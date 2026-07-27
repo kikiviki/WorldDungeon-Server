@@ -268,6 +268,68 @@ unnecessary stock spells can extend the band if the design grows — and the
 > alone, and more importantly it is *not* a shape the client or the stock data has ever used, so
 > it buys nothing the 3-tier model doesn't already give.
 
+### Scaling: level and stats are primary, tiers are the chase
+
+**DECIDED: Mk. I / II / III.** With scaling carried by `formula` + `max` rather than by flat
+per-tier values — so a tier is not "+10 damage", it is **a higher ceiling on what your level and
+gear can reach**.
+
+**Level scaling is the `formula` field**, per effect slot
+(`Mob::CalcSpellEffectValue_formula`, `zone/spell_effects.cpp:3517`):
+
+| `formula` | Result |
+|---:|---|
+| 100 *(or 0)* | `base` — flat, **no level scaling** |
+| 101 | `base + level/2` |
+| 102 | `base + level` |
+| 103 / 104 / 105 | `base + level×2 / ×3 / ×4` |
+| 109 / 110 | `base + level/4` / `level/6` |
+| 111 / 112 | `base + 6×(level−16)` / `8×(level−24)` |
+| *(120s)* | `base + N×(level−50)` — post-50 curves |
+| `< 100` | `base + (level × formula)` — arbitrary linear slope |
+
+**`max` is the cap on the scaled result** (`zone/spell_effects.cpp:~3814`):
+
+```cpp
+if (max_value != 0) {
+    if (result > max_value) result = max_value;   // and the mirror for negatives
+}
+```
+
+#### The tier model this enables
+
+> **Mk. I / II / III share one `formula` and differ mainly in `max`.**
+>
+> Mk. I scales with level to a modest ceiling. Mk. II raises the ceiling. Mk. III raises it
+> again. The spell keeps growing with the *character* the whole way; the tier decides how far it
+> is allowed to go.
+
+That fits the intent exactly — **most players live on Mk. I**, and it stays relevant because it
+scales with level and stats. **Mk. II arrives after a few rebirths** as a ceiling-raise on
+something already familiar. **Mk. III is the elite chase**, and it is valuable precisely because
+the player already knows what that spell does and can feel the cap lift.
+
+It also fails gracefully: a player at Mk. I is *behind*, not *broken*, which matters for a
+solo-first design.
+
+**Do not express tiers as flat base bumps.** The stock example (base 9 → 10 → 11) is a live
+convention we should **not** copy — it makes a tier feel like nothing.
+
+#### Stat scaling
+
+Heal and nuke output already scales with the caster's primary stat and with spell-damage /
+heal-amount bonuses natively — that is engine-side and needs no per-spell field.
+
+#### Focus effects — one field decides it
+
+`spells_new.not_focusable` gates the whole focus system for a spell
+(`zone/spell_effects.cpp:4708, 5444`). **It must be `0`** on anything meant to benefit from
+focus items, mantles, or AA. Since the Cleric's mantles *are* focus effects (SPA 125/132), a
+stray `not_focusable = 1` on a heal would silently make the Standard Mantle do nothing to it.
+
+**Author rule: `not_focusable = 0` unless there is a stated reason.** It is a plausible source of
+"why is my focus not working" bugs that no log will explain.
+
 ### Revised spell ranges
 
 | Purpose | Range |
