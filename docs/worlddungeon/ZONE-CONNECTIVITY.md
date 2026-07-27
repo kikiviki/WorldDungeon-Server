@@ -26,7 +26,11 @@ enforce that without knowing what live actually does — this is that list.
 | **door** | `doors`, other opentypes, with `dest_zone` | 35 | ” |
 | **script** | quest `MovePC` / `eq.move_pc` | 46 destinations | — |
 
-Totals: 618 zones, 591 distinct connected pairs.
+Totals: **482 distinct zones**, 591 distinct connected pairs.
+
+> The `zone` table has 618 *rows* but only 482 distinct `short_name`/`zoneidnumber` values —
+> the extras are per-version rows. Count `DISTINCT short_name`, not rows, or every
+> per-zone ratio comes out wrong.
 
 ### Teleport doors are the clicky-portal mechanism
 
@@ -152,10 +156,39 @@ tooltip lists every mechanism regardless.
 
 Same-name map files are stacked: `acrylia.txt`, `acrylia_1.txt`, `acrylia_2.txt` are one node.
 
-**469 of 618 zones have Brewall maps**; the rest (mostly instanced content) are skipped and
+**469 of 482 zones have Brewall maps**; the rest (mostly instanced content) are skipped and
 reported. The full world takes ~12s and produces a ~5 MB file. Dense dungeon maps are
 decimated to `--max-segments` per zone, dropping the *shortest* segments so the silhouette
 survives.
+
+### Islands and one-way travel
+
+`--components` partitions the whole graph without rendering. Current state:
+
+```
+482 zones | 388 with at least one connection | 4 components
+233 of 949 directed connections are ONE-WAY (25%)
+
+[1] 362 zones   mainland
+[2]  20 zones   abysmal, barindu, ferubi, ikkinz, inktuta, kodtaz, natimbi, qinimi ...
+[3]   5 zones   buriedsea, kattacastrum, silyssar, solteris, zhisza
+[4]   2 zones   devastation, rage
+
+ISOLATED zones (no connections at all): 94
+```
+
+**A quarter of all connections are one-way**, which makes "connected" a weaker claim than it
+sounds. `--directed` follows only outbound edges, and `--components --directed` reports
+**strongly-connected** components — sets you can round-trip between:
+
+| View | Components | Mainland size |
+|---|---|---|
+| Undirected — "same cluster" | 4 | 362 |
+| Directed — "can round-trip" | 94 | **245** |
+
+117 zones sit in the mainland cluster but can't be round-tripped back into it. For a server
+whose Pillar 2 is *"access is free; power is the wall"*, one-way edges are a design decision,
+not an accident — worth auditing deliberately rather than inheriting from PEQ.
 
 ### Coordinates — the part that bites
 

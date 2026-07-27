@@ -26,9 +26,12 @@ COORDINATES
     Database coordinates are negated on the way in so overlays line up.
 
 Examples
-    zone-map-graph.py --from blackburrow --depth 2 -o bb.html
-    zone-map-graph.py --zones blackburrow,everfrost,qeytoqrg,jaggedpine
-    zone-map-graph.py --all --engine sfdp -o world.html
+    zone-map-graph.py --from buriedsea                  everything reachable (island check)
+    zone-map-graph.py --from blackburrow --depth 2      stop 2 connections out
+    zone-map-graph.py --from bazaar --directed          only where you can actually GET TO
+    zone-map-graph.py --components                      text report: find every island
+    zone-map-graph.py --zones blackburrow,everfrost,qeytoqrg
+    zone-map-graph.py --all --engine sfdp --limit 0 -o world.html
 """
 
 import argparse
@@ -154,32 +157,162 @@ def load_map(zone, max_segments):
 
 # ---------------------------------------------------------------- selection
 
-def select_zones(args, zones, edges):
+def adjacency(edges, directed):
+    """
+    Neighbour map. Undirected answers "what cluster is this in"; directed
+    answers "where can a player starting here actually get to" - a different
+    question, since a quarter of all connections are one-way.
+    """
     adj = defaultdict(set)
     for a, b, _t in edges:
         adj[a].add(b)
-        adj[b].add(a)
+        if not directed:
+            adj[b].add(a)
+    return adj
+
+
+def reachable(seed, adj, depth):
+    """BFS from seed. depth=None walks until the frontier is exhausted."""
+    seen, frontier, hops = {seed}, {seed}, 0
+    while frontier and (depth is None or hops < depth):
+        nxt = set()
+        for z in frontier:
+            nxt |= adj[z]
+        frontier = nxt - seen
+        seen |= frontier
+        hops += 1
+    return seen
+
+
+def select_zones(args, zones, edges):
+    adj = adjacency(edges, args.directed)
 
     if args.zones:
         want = {z.strip().lower() for z in args.zones.split(",") if z.strip()}
     elif args.start:
-        want, frontier = {args.start.lower()}, {args.start.lower()}
-        for _ in range(args.depth):
-            nxt = set()
-            for z in frontier:
-                nxt |= adj[z]
-            nxt -= want
-            want |= nxt
-            frontier = nxt
+        seed = args.start.lower()
+        if seed not in zones:
+            sys.exit(f"unknown zone: {seed}")
+        want = reachable(seed, adj, args.depth)
+        if len(want) == 1:
+            print(f"    {seed} has no connections at all - it is isolated.", file=sys.stderr)
+        elif args.depth is None:
+            kind = "reachable from" if args.directed else "connected to"
+            print(f"    {len(want)} zones {kind} {seed}", file=sys.stderr)
     else:
         want = set(zones)
 
     have = {z for z in want if z in zones and os.path.exists(os.path.join(MAPS, z + ".txt"))}
     missing = sorted(want - have)
+
     if args.limit and len(have) > args.limit:
         ranked = sorted(have, key=lambda z: -len(adj[z]))
+        dropped = len(have) - args.limit
         have = set(ranked[:args.limit])
+        print(f"    WARNING: --limit {args.limit} dropped {dropped} zones - this view is "
+              f"PARTIAL and will look more isolated than it is. Use --limit 0 for all of them.",
+              file=sys.stderr)
     return have, missing
+
+
+# ---------------------------------------------------------------- components
+
+def undirected_components(nodes, adj):
+    seen, comps = set(), []
+    for n in sorted(nodes):
+        if n in seen:
+            continue
+        stack, comp = [n], set()
+        while stack:
+            z = stack.pop()
+            if z in comp:
+                continue
+            comp.add(z)
+            stack.extend(adj[z] - comp)
+        seen |= comp
+        comps.append(comp)
+    return comps
+
+
+def strong_components(nodes, out):
+    """
+    Iterative Kosaraju. A strongly-connected component is a set of zones you can
+    round-trip between - with 25% of edges one-way, that is a much stricter and
+    more useful notion than "same cluster".
+    """
+    order, seen = [], set()
+    for s in sorted(nodes):                       # pass 1: finish order
+        if s in seen:
+            continue
+        stack = [(s, iter(sorted(out.get(s, ()))))]
+        seen.add(s)
+        while stack:
+            node, it = stack[-1]
+            nxt = next(it, None)
+            if nxt is None:
+                order.append(node)
+                stack.pop()
+            elif nxt not in seen:
+                seen.add(nxt)
+                stack.append((nxt, iter(sorted(out.get(nxt, ())))))
+
+    rev = defaultdict(set)                        # transpose
+    for a, bs in out.items():
+        for b in bs:
+            rev[b].add(a)
+
+    seen, comps = set(), []                       # pass 2: descending finish time
+    for s in reversed(order):
+        if s in seen:
+            continue
+        stack, comp = [s], set()
+        while stack:
+            z = stack.pop()
+            if z in comp:
+                continue
+            comp.add(z)
+            stack.extend(rev[z] - comp - seen)
+        seen |= comp
+        comps.append(comp)
+    return comps
+
+
+def report_components(zones, edges, directed, full_under=12):
+    nodes = set(zones)
+    connected = {z for a, b, _t in edges for z in (a, b) if z in nodes}
+    orphans = sorted(nodes - connected)
+
+    directed_pairs = {(a, b) for a, b, _t in edges}
+    one_way = sum(1 for a, b in directed_pairs if (b, a) not in directed_pairs)
+
+    if directed:
+        comps = strong_components(connected, adjacency(edges, True))
+        title = "STRONGLY-CONNECTED components (round-trip reachable)"
+    else:
+        comps = undirected_components(connected, adjacency(edges, False))
+        title = "CONNECTED components (ignoring direction)"
+    comps.sort(key=len, reverse=True)
+
+    print(f"\n{title}\n{'=' * len(title)}")
+    print(f"{len(zones)} zones total  |  {len(connected)} with at least one connection  "
+          f"|  {len(comps)} components")
+    print(f"{one_way} of {len(directed_pairs)} directed connections are ONE-WAY "
+          f"({100 * one_way / max(len(directed_pairs), 1):.0f}%)\n")
+
+    for i, c in enumerate(comps, 1):
+        tag = "  <-- mainland" if i == 1 and len(c) > 50 else ""
+        print(f"[{i}] {len(c)} zones{tag}")
+        members = sorted(c)
+        if len(c) <= full_under:
+            print(f"      {', '.join(members)}")
+        else:
+            print(f"      {', '.join(members[:8])} ... (+{len(c) - 8} more)")
+
+    print(f"\nISOLATED zones (no connections at all): {len(orphans)}")
+    if orphans:
+        print(f"      {', '.join(orphans[:12])}"
+              f"{f' ... (+{len(orphans) - 12} more)' if len(orphans) > 12 else ''}")
+    print("\nA small component is an island: reachable only from within itself.")
 
 
 # ---------------------------------------------------------------- layout
@@ -390,7 +523,15 @@ def main():
     g.add_argument("--zones", help="comma-separated short names")
     g.add_argument("--from", dest="start", help="seed zone for a neighbourhood walk")
     g.add_argument("--all", action="store_true", help="every zone with a map file")
-    p.add_argument("--depth", type=int, default=1, help="hops from --from (default 1)")
+    p.add_argument("--depth", type=int, default=None, metavar="N",
+                   help="stop N connections out from --from (default: no limit, "
+                        "walk everything reachable)")
+    p.add_argument("--directed", action="store_true",
+                   help="follow only outbound connections - where you can actually GET TO "
+                        "from the seed, rather than what cluster it belongs to")
+    p.add_argument("--components", action="store_true",
+                   help="text report: partition every zone into connected components to find "
+                        "islands, then exit without rendering")
     p.add_argument("--limit", type=int, default=120,
                    help="cap zones, keeping the best-connected (default 120; 0 = no cap)")
     p.add_argument("--node-size", type=int, default=210, help="node width in px")
@@ -401,11 +542,15 @@ def main():
     p.add_argument("-o", "--out", default="zone-graph.html")
     args = p.parse_args()
 
-    if not os.path.isdir(MAPS):
+    if not args.components and not os.path.isdir(MAPS):
         sys.exit(f"map directory not found: {MAPS} (set BREWALL_DIR)")
 
     print("==> reading database", file=sys.stderr)
     zones, edges = load_zones(), load_edges()
+
+    if args.components:
+        report_components(zones, edges, args.directed)
+        return
 
     sel, missing = select_zones(args, zones, edges)
     if not sel:
