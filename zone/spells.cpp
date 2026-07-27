@@ -3134,6 +3134,31 @@ int Mob::CheckStackConflict(uint16 spellid1, int caster_level1, uint16 spellid2,
 	}
 
 	/*
+		W13 - WorldDungeon stance exclusivity.
+
+		Two different spells sharing a spell_group in the custom band are members of one
+		stance pool: exactly one may be worn, and the incoming one always wins. Magnitude
+		is deliberately NOT consulted - swapping to a weaker stance is a legitimate tactical
+		choice, and the whole point of a pool is that the player picks.
+
+		This must sit ABOVE the effect_match branch below. Every native exclusivity
+		primitive the engine has - SPA 148, 149, and the 446-449 stacker chain - is inside
+		that branch, so a family of buffs sharing an effect layout disables all of them.
+		Sharing a layout is what makes a stance pool a pool, hence this check.
+		See docs/worlddungeon/P1-STACKING-DEFECT.md.
+
+		Same-id casts are already handled above and never reach here, so a refresh keeps
+		its normal level-comparison behaviour.
+	*/
+	if (spellid1 != spellid2 &&
+	    sp1.spell_group >= WD_EXCLUSIVE_SPELLGROUP_BASE &&
+	    sp1.spell_group == sp2.spell_group) {
+		LogSpells("[{}] ([{}]) and [{}] ([{}]) share WorldDungeon exclusivity group [{}], overwriting",
+			sp1.name, spellid1, sp2.name, spellid2, sp2.spell_group);
+		return 1;
+	}
+
+	/*
 	One of these is a bard song and one isn't and they're both beneficial so they should stack.
 	*/
 	if(IsBardSong(spellid1) != IsBardSong(spellid2))

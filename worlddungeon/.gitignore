@@ -1,0 +1,12 @@
+# Upstream's root .gitignore has a blanket `bin/` rule (line 53) aimed at build
+# output. It also swallowed worlddungeon/bin/ — so wd-migrate, wd-backup,
+# wd-backup-nightly and wd-baseline were never version-controlled, despite F2/F3
+# existing precisely so that custom tooling and data are reproducible. The
+# nightly backup script that protects the database was itself unbacked-up.
+#
+# Re-include it here rather than editing the root file, per F2's rule that
+# WorldDungeon stays outside upstream paths so an upstream merge can't conflict.
+# A nested .gitignore takes precedence for paths beneath it, and the directory
+# itself must be un-excluded before anything inside it can be re-included.
+!bin/
+!bin/*

@@ -587,8 +587,30 @@ enum SpellRestriction
 	IS_END_OR_MANA_BELOW_30_PCT2                                              = 49809, // You can only perform this solo if you have less than 30% mana or endurance.
 	HAS_NO_HARMONIOUS_PRECISION_BUFF                                          = 50003, // This spell will not work if you have the Harmonious Precision line active.
 	HAS_NO_HARMONIOUS_EXPANSE_BUFF                                            = 50009, // This spell will not work if you have the Harmonious Expanse line active.
+	// WorldDungeon custom restrictions: 60000-60999 (docs/worlddungeon/F1-ID-RANGES.md).
+	// Custom ids get no client-side failure message - keep them on effects that fail silently.
+	IS_TARGET_HAS_WD_SPELLGROUP                                               = 60000, // W1: target has an active buff belonging to spellgroup N; N rides in the same slot's max field (SPA 442/443).
 	UNKNOWN_99999                                                             = 99999, // | caster restriction | works will spell 27672 Strike of Ire
 };
+
+// W13 — WorldDungeon stance exclusivity.
+//
+// Buffs whose spell_group is at or above this base are mutually exclusive with
+// each other: applying one replaces any worn buff sharing its group, newest
+// always winning regardless of magnitude. That is the "stance pool" rule, and
+// it is what the Cleric mantles and the Monk's two pools need.
+//
+// It exists because NONE of the engine's native exclusivity primitives can do
+// this job here. SPA 148, 149 and the 446-449 stacker chain all live inside the
+// `if (!effect_match)` branch of Mob::CheckStackConflict (zone/spells.cpp:3164),
+// so a family of buffs sharing an effect layout — the very thing that makes a
+// stance pool a pool — disables every one of them. See
+// docs/worlddungeon/P1-STACKING-DEFECT.md.
+//
+// Gated to the custom band so stock spell behaviour is untouched: PEQ's highest
+// spell_group is well below this, and F1 allocates WorldDungeon spellgroups
+// from 500,000 (docs/worlddungeon/F1-ID-RANGES.md).
+constexpr int WD_EXCLUSIVE_SPELLGROUP_BASE = 500000;
 
 enum NegateSpellEffectType
 {

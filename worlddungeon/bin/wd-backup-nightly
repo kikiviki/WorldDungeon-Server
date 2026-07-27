@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+#
+# wd-backup-nightly — the scheduled backup job (backlog F3).
+#
+# Installed in the eqdev crontab as:
+#   0 4 * * * /opt/eqemu-servers/akk-stack/code/worlddungeon/bin/wd-backup-nightly
+#
+# Backs up the two things that cannot be rebuilt from git:
+#   - the peq database (player state and any custom rows)
+#   - server config (eqemu_config.json, login.json)
+#
+# Everything else - the engine, and every custom row's defining SQL under
+# worlddungeon/migrations/ - is version-controlled and already safe on GitHub.
+#
+# Destination is a Dropbox-synced folder, so backups leave this box. A backup on
+# the same disk as the database is not a backup.
+
+set -uo pipefail
+
+DEST="${WD_BACKUP_DIR:-/home/eqdev/Dropbox/eqemu/eq-serv-backup}"
+RETAIN_DAYS="${WD_BACKUP_RETAIN_DAYS:-14}"
+STACK="${STACK_DIR:-/opt/eqemu-servers/akk-stack}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG="$DEST/wd-backup.log"
+
+mkdir -p "$DEST"
+exec >> "$LOG" 2>&1
+
+echo "================================================================"
+echo "wd-backup-nightly  $(date '+%Y-%m-%d %H:%M:%S %Z')"
+
+fail=0
+
+# --- database -----------------------------------------------------------
+# wd-backup already validates its own output and deletes a truncated dump,
+# so a non-zero exit here means there is no new dump, not a bad one.
+if WD_BACKUP_DIR="$DEST" "$HERE/wd-backup" dump; then
+  :
+else
+  echo "!! DATABASE BACKUP FAILED"
+  fail=1
+fi
+
+# --- server config ------------------------------------------------------
+# These contain credentials, so the archive is written 0600.
+CONFIG_OUT="$DEST/wd-config-$(date +%Y-%m-%d-%H%M%S).tar.gz"
+if tar -czf "$CONFIG_OUT" -C "$STACK/server" eqemu_config.json login.json 2>/dev/null; then
+  chmod 600 "$CONFIG_OUT"
+  echo "OK  $CONFIG_OUT  ($(du -h "$CONFIG_OUT" | cut -f1))"
+else
+  echo "!! CONFIG BACKUP FAILED"
+  rm -f "$CONFIG_OUT"
+  fail=1
+fi
+
+# --- prune --------------------------------------------------------------
+# Only ever touches files this tooling names. Prune runs even if a backup
+# failed, but never prunes below one surviving dump.
+if [[ $(find "$DEST" -maxdepth 1 -name 'wd-*.sql.gz' | wc -l) -gt 1 ]]; then
+  WD_BACKUP_DIR="$DEST" "$HERE/wd-backup" prune "$RETAIN_DAYS"
+  find "$DEST" -maxdepth 1 -name 'wd-config-*.tar.gz' -type f -mtime "+$RETAIN_DAYS" -print -delete
+else
+  echo "==> skipping prune: fewer than 2 dumps on disk"
+fi
+
+# Keep the log from growing without bound.
+if [[ -f "$LOG" && $(stat -c%s "$LOG") -gt 1048576 ]]; then
+  tail -c 524288 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+fi
+
+if [[ $fail -eq 0 ]]; then
+  echo "DONE ok"
+else
+  echo "DONE WITH FAILURES"
+fi
+exit $fail

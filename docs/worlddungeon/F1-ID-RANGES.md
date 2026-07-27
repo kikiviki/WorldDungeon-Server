@@ -75,6 +75,14 @@ assignment here as it's taken so two work streams can't claim the same block.
 |---|---|---|---|
 | `spells_new.id` | 42,700–42,708 | Cleric mantles, Mk. I/II/III (`0004`) | **claimed** |
 | `spells_new.id` | 42,710–42,712 | mantle defensive procs (`0004`) | **claimed** |
+| `spells_new.id` | 42,713–42,736 | Cleric heal lines, 8 spells × Mk. I/II/III (`0005`) | **claimed** |
+| `spells_new.spellgroup` | 502,001–502,008 | Cleric heal-line spellgroups (`0005`) | **claimed** |
+| `spells_new.id` | 43,540–43,569 | Wizard lures + nukes, spells 1–10 × Mk. I/II/III (`0006`) | **claimed** |
+| `spells_new.id` | 43,609–43,620 | Wizard familiars + Sculpt Spell, spells 24–27 (`0006`) | **claimed** |
+| `spells_new.spellgroup` | 512,001–512,002, 512,010–512,015, 512,050–512,052, 512,060 | Wizard core spellgroups (`0006`) | **claimed** |
+| `spells_new.id` | 43,570–43,581 | Wizard combo riders 11–14, untiered at base ids (`0007`) | **claimed** |
+| `spells_new.id` | 43,630–43,633 | Wizard combo payloads (`0007`) | **claimed** |
+| `spells_new.spellgroup` | 512,020–512,023 | Wizard combo-rider lines (`0007`) | **claimed** |
 | ~~`spells_new.id` 100,000–100,999~~ | — | ~~Cleric~~ — **retired, above the client cap** | void |
 | `spells_new.spellgroup` | 500,001 | `clr_mantle` — the mantle pool (`0003`) | **claimed** |
 | `spells_new.spellgroup` | 500,002–500,004 | mantle proc lines (`0003`) | **claimed** |
@@ -206,12 +214,19 @@ Lua and in SQL.
 W1 adds one new entry to `enum SpellRestriction` (`common/spdat.h:298`). The enum is
 live-derived, so any value Live might later claim is a merge hazard.
 
-**Allocated: `1000` — `SpellRestrictionTargetHasSpellGroup`.**
+~~Allocated: `1000`~~ ⚠️ **Corrected at implementation time: `1000` was already taken** —
+stock defines `IS_BETWEEN_LEVEL_1_AND_75 = 1000` (`common/spdat.h`), which the original
+allocation missed. Live-derived values run up to ~50,009 (plus a stray 99,999).
 
-Sparse, far above anything the live-derived values occupy, and a round number that reads as
-obviously custom in a diff. Per W1's own design note, the restriction encodes only *that* a
-spellgroup is required; *which* spellgroup is read from the spell's limit/max field — so this is
-**one id, permanently**, with no block to reserve and no ceiling on spellgroup count.
+**Allocated: `60000` — `IS_TARGET_HAS_WD_SPELLGROUP`, and 60,000–60,999 is reserved as the
+WorldDungeon custom-restriction band.**
+
+Above everything live occupies, below the stray 99,999. Per W1's own design note, the
+restriction encodes only *that* a spellgroup is required; *which* spellgroup rides in the
+**`max` field of the same SPA 442/443 effect slot** (base = payload spell, limit = 60000,
+max = spellgroup) — so this is **one id, permanently**, with no ceiling on spellgroup count.
+Custom restriction ids get no client-side failure message; the fallthrough is a silent fail,
+which is the behaviour the detonation pattern wants anyway.
 
 ---
 

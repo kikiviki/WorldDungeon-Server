@@ -1,0 +1,257 @@
+#!/usr/bin/env bash
+#
+# wd-migrate — apply WorldDungeon's version-controlled SQL migrations.
+#
+# Custom content must never exist only as mutations in one MariaDB volume.
+# `make init-peq-database` overwrites the database, the prod box needs the same
+# content from scratch, and hand-mutated data has no diff, no review and no
+# rollback. Every custom row WorldDungeon owns is created by a file in
+# ../migrations/ and applied by this script.
+#
+#   wd-migrate status              show applied / pending / drifted
+#   wd-migrate up [--dry-run]      apply all pending migrations, in order
+#   wd-migrate verify              re-check checksums of applied migrations
+#   wd-migrate new <name>          scaffold the next migration file
+#
+# Migrations are ordered by their numeric prefix and applied exactly once. An
+# applied file is immutable — edit it and `verify` fails loudly. To change
+# something already applied, write a new migration.
+#
+# Requires docker access to the akk-stack mariadb container.
+
+set -euo pipefail
+
+STACK="${STACK_DIR:-/opt/eqemu-servers/akk-stack}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MIGRATIONS="${MIGRATIONS_DIR:-$HERE/../migrations}"
+
+if [[ ! -d "$MIGRATIONS" ]]; then
+  echo "error: migrations directory not found: $MIGRATIONS" >&2
+  exit 1
+fi
+MIGRATIONS="$(cd "$MIGRATIONS" && pwd)"
+
+cd "$STACK"
+set -a; . ./.env; set +a
+export MARIADB_USER MARIADB_PASSWORD MARIADB_DATABASE
+
+# The docker group isn't active in a non-interactive shell until a fresh login
+# (akk-stack README section 6), so fall back to `sg docker`.
+docker_run() {
+  if docker info >/dev/null 2>&1; then
+    bash -c "$1"
+  else
+    sg docker -c "$1"
+  fi
+}
+
+# Run SQL from stdin. Fails the script on any SQL error.
+mysql_stdin() {
+  docker_run "docker compose exec -T -e MYSQL_PWD=\"\$MARIADB_PASSWORD\" \
+    mariadb mysql -u\"\$MARIADB_USER\" \"\$MARIADB_DATABASE\" \
+    --batch --skip-column-names $*"
+}
+
+# Run a single SQL statement, return tab-separated rows with no header.
+query() {
+  printf '%s\n' "$1" | mysql_stdin
+}
+
+ensure_tracking_table() {
+  query "
+    CREATE TABLE IF NOT EXISTS wd_migration (
+      version     VARCHAR(20)  NOT NULL PRIMARY KEY,
+      name        VARCHAR(190) NOT NULL,
+      checksum    CHAR(64)     NOT NULL,
+      applied_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      duration_ms INT UNSIGNED NOT NULL DEFAULT 0
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  " >/dev/null
+}
+
+migration_files() {
+  find "$MIGRATIONS" -maxdepth 1 -name '[0-9]*.sql' -type f | sort
+}
+
+version_of() { basename "$1" | cut -d_ -f1; }
+name_of()    { basename "$1" .sql | cut -d_ -f2- ; }
+checksum_of(){ sha256sum "$1" | cut -d' ' -f1; }
+
+# version -> checksum for everything already applied
+applied_map() {
+  query "SELECT version, checksum FROM wd_migration ORDER BY version;"
+}
+
+sql_escape() { printf '%s' "$1" | sed "s/'/''/g"; }
+
+cmd_status() {
+  ensure_tracking_table
+  local applied; applied="$(applied_map)"
+  local any=0 pending=0 drift=0
+
+  printf '%-8s %-14s %s\n' VERSION STATE NAME
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    any=1
+    local v c state
+    v="$(version_of "$f")"; c="$(checksum_of "$f")"
+    local recorded
+    recorded="$(printf '%s\n' "$applied" | awk -v v="$v" -F'\t' '$1==v {print $2}')"
+    if [[ -z "$recorded" ]]; then
+      state="pending"; pending=$((pending+1))
+    elif [[ "$recorded" != "$c" ]]; then
+      state="DRIFTED"; drift=$((drift+1))
+    else
+      state="applied"
+    fi
+    printf '%-8s %-14s %s\n' "$v" "$state" "$(name_of "$f")"
+  done < <(migration_files)
+
+  [[ $any -eq 0 ]] && echo "(no migrations yet)"
+
+  # An applied version with no file on disk means someone deleted a migration.
+  while IFS=$'\t' read -r v _; do
+    [[ -z "$v" ]] && continue
+    if ! migration_files | grep -q "/${v}_"; then
+      printf '%-8s %-14s %s\n' "$v" "MISSING" "applied, but no file on disk"
+      drift=$((drift+1))
+    fi
+  done < <(printf '%s\n' "$applied")
+
+  echo
+  echo "pending: $pending   problems: $drift"
+  [[ $drift -gt 0 ]] && return 1
+  return 0
+}
+
+cmd_verify() {
+  ensure_tracking_table
+  if cmd_status >/dev/null; then
+    echo "OK — every applied migration matches its file."
+  else
+    echo "FAILED — see 'wd-migrate status'." >&2
+    echo "An applied migration is immutable. Do not 'fix' the file; write a new migration." >&2
+    return 1
+  fi
+}
+
+cmd_up() {
+  local dry_run=0
+  [[ "${1:-}" == "--dry-run" ]] && dry_run=1
+
+  ensure_tracking_table
+
+  # Refuse to apply anything on top of a drifted history.
+  if ! cmd_status >/dev/null; then
+    echo "refusing to apply: migration history has problems." >&2
+    cmd_status || true
+    return 1
+  fi
+
+  local applied; applied="$(applied_map)"
+  local count=0
+
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    local v c
+    v="$(version_of "$f")"; c="$(checksum_of "$f")"
+    if printf '%s\n' "$applied" | awk -v v="$v" -F'\t' '$1==v {found=1} END{exit !found}'; then
+      continue
+    fi
+
+    count=$((count+1))
+    if [[ $dry_run -eq 1 ]]; then
+      echo "would apply  $v  $(name_of "$f")"
+      continue
+    fi
+
+    echo "==> applying $v  $(name_of "$f")"
+    local start_ms end_ms
+    start_ms=$(date +%s%3N)
+
+    # MySQL DDL is not transactional, so a migration that mixes DDL and DML can
+    # partially apply. Keep each migration small and idempotent — see README.
+    if ! mysql_stdin < "$f"; then
+      echo >&2
+      echo "FAILED: $v $(name_of "$f") — not recorded as applied." >&2
+      echo "Fix the migration and re-run. If it partially applied, make it idempotent." >&2
+      return 1
+    fi
+
+    end_ms=$(date +%s%3N)
+    query "INSERT INTO wd_migration (version, name, checksum, duration_ms)
+           VALUES ('$(sql_escape "$v")', '$(sql_escape "$(name_of "$f")")',
+                   '$c', $((end_ms - start_ms)));" >/dev/null
+  done < <(migration_files)
+
+  if [[ $count -eq 0 ]]; then
+    echo "nothing to do — database is up to date."
+  elif [[ $dry_run -eq 1 ]]; then
+    echo "$count migration(s) would be applied."
+  else
+    echo "applied $count migration(s)."
+  fi
+}
+
+cmd_new() {
+  local name="${1:-}"
+  if [[ -z "$name" ]]; then
+    echo "usage: wd-migrate new <short_name>" >&2
+    return 1
+  fi
+  name="$(printf '%s' "$name" | tr ' -' '__' | tr -cd '[:alnum:]_' | tr '[:upper:]' '[:lower:]')"
+
+  local last next
+  last="$(migration_files | tail -1)"
+  if [[ -z "$last" ]]; then next="0001"; else
+    next="$(printf '%04d' $((10#$(version_of "$last") + 1)))"
+  fi
+
+  local path="$MIGRATIONS/${next}_${name}.sql"
+  cat > "$path" <<EOF
+-- ${next}_${name}
+--
+-- Purpose:
+--
+-- ID ranges used (see docs/worlddungeon/F1-ID-RANGES.md — claim the block there
+-- in this same commit):
+--
+-- Idempotent: this file must be safe to re-run. Use INSERT ... ON DUPLICATE KEY
+-- UPDATE or DELETE-then-INSERT over the owned id range, never a bare INSERT.
+
+
+-- ---------------------------------------------------------------------------
+-- IF THIS MIGRATION WRITES spells_new, KEEP THE BLOCK BELOW AND SET THE RANGE.
+-- Otherwise delete it.
+--
+-- Six spells_new varchar columns are NULLABLE with a NULL default, and
+-- SharedDatabase::LoadSpells() (common/shareddb.cpp:1686-1691) copies them into
+-- std::string with NO NULL GUARD. A single NULL aborts the entire shared-memory
+-- build — every custom spell vanishes, restarts don't help, and the only
+-- symptom is 'basic_string: construction from null is not valid'. It cost a
+-- session once; see 0008_spell_text_nulls.sql.
+-- ---------------------------------------------------------------------------
+UPDATE spells_new
+SET teleport_zone = COALESCE(teleport_zone, ''),
+    you_cast      = COALESCE(you_cast,      ''),
+    other_casts   = COALESCE(other_casts,   ''),
+    cast_on_you   = COALESCE(cast_on_you,   ''),
+    cast_on_other = COALESCE(cast_on_other, ''),
+    spell_fades   = COALESCE(spell_fades,   ''),
+    typedescnum   = COALESCE(typedescnum,   0),
+    effectdescnum = COALESCE(effectdescnum, 0)
+WHERE id BETWEEN <FIRST_ID> AND <LAST_ID>;
+EOF
+  echo "created $path"
+}
+
+case "${1:-}" in
+  status)  shift; cmd_status "$@" ;;
+  up)      shift; cmd_up "$@" ;;
+  verify)  shift; cmd_verify "$@" ;;
+  new)     shift; cmd_new "$@" ;;
+  *)
+    sed -n '3,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    exit 1
+    ;;
+esac

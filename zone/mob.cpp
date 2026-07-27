@@ -5898,7 +5898,7 @@ void Mob::TryTriggerOnCastRequirement()
 			if (IsValidSpell(spell_id)) {
 				for (int i = 0; i < EFFECT_COUNT; i++) {
 					if ((spells[spell_id].effect_id[i] == SpellEffect::TriggerOnReqTarget) || (spells[spell_id].effect_id[i] == SpellEffect::TriggerOnReqCaster)) {
-						if (PassCastRestriction(spells[spell_id].limit_value[i])) {
+						if (PassCastRestriction(spells[spell_id].limit_value[i], spells[spell_id].max_value[i])) {
 							SpellFinished(spells[spell_id].base_value[i], this, EQ::spells::CastingSlot::Item, 0, -1, spells[spell_id].resist_difficulty);
 							if (!TryFadeEffect(e)) {
 								BuffFadeBySlot(e);

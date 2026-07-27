@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+#
+# wd-backup — dump and restore the WorldDungeon database.
+#
+#   wd-backup dump [file]        write a gzipped dump (default: dated file in backup/database/)
+#   wd-backup restore <file>     restore into a NAMED database (never the live one implicitly)
+#   wd-backup verify <file>      restore into a scratch database, compare, drop it
+#   wd-backup prune [days]       delete wd-*.sql.gz older than N days (default 14)
+#
+# Why this exists rather than `make mysql-backup` (backlog F3):
+#
+#   `make mysql-backup` redirects mysqldump to /var/lib/mysql inside the
+#   container, then tries to `mv` the result out of ./data/mariadb on the host.
+#   The file is written as root, the host user is not root, and the move fails
+#   with "Permission denied" - leaving a large root-owned dump stranded in the
+#   MariaDB data directory. It fails on a stock akk-stack checkout.
+#
+#   This script streams mysqldump to the host over stdout instead, so nothing is
+#   ever written inside the container and no ownership problem can arise.
+#
+# Requires docker access to the akk-stack mariadb container.
+
+set -euo pipefail
+
+STACK="${STACK_DIR:-/opt/eqemu-servers/akk-stack}"
+
+# Where dumps land. Override with WD_BACKUP_DIR; the scheduled job points this
+# at the Dropbox-synced folder so backups leave the box.
+BACKUP_DIR="${WD_BACKUP_DIR:-$STACK/backup/database}"
+
+cd "$STACK"
+set -a; . ./.env; set +a
+export MARIADB_ROOT_PASSWORD MARIADB_DATABASE
+
+docker_run() {
+  if docker info >/dev/null 2>&1; then bash -c "$1"; else sg docker -c "$1"; fi
+}
+
+# mysql/mysqldump as root against an arbitrary database.
+mysql_as_root() {
+  docker_run "docker compose exec -T -e MYSQL_PWD=\"\$MARIADB_ROOT_PASSWORD\" \
+    mariadb mysql -uroot $*"
+}
+mysqldump_as_root() {
+  docker_run "docker compose exec -T -e MYSQL_PWD=\"\$MARIADB_ROOT_PASSWORD\" \
+    mariadb mysqldump -uroot --lock-tables=false --single-transaction --routines --events $*"
+}
+
+cmd_dump() {
+  local out="${1:-$BACKUP_DIR/wd-${MARIADB_DATABASE}-$(date +%Y-%m-%d-%H%M%S).sql.gz}"
+  mkdir -p "$(dirname "$out")"
+  echo "==> dumping $MARIADB_DATABASE"
+  mysqldump_as_root "\"\$MARIADB_DATABASE\"" | gzip > "$out"
+
+  # A truncated dump is worse than no dump, because it looks like a backup.
+  if ! gzip -t "$out"; then
+    echo "FAILED: dump is not a valid gzip stream — removing $out" >&2
+    rm -f "$out"; return 1
+  fi
+  if ! zcat "$out" | tail -5 | grep -q 'Dump completed'; then
+    echo "FAILED: dump has no 'Dump completed' trailer, it is truncated — removing $out" >&2
+    rm -f "$out"; return 1
+  fi
+
+  echo "OK  $out  ($(du -h "$out" | cut -f1))"
+  echo "$out"
+}
+
+# Restore into an explicitly named database. Refuses to touch the live one
+# unless the name is spelled out, because a restore is destructive.
+cmd_restore() {
+  local file="${1:-}" target="${2:-}"
+  if [[ -z "$file" || -z "$target" ]]; then
+    echo "usage: wd-backup restore <file.sql.gz> <target_database>" >&2
+    echo "  name the target explicitly — restore drops and recreates it." >&2
+    return 1
+  fi
+  [[ -f "$file" ]] || { echo "no such file: $file" >&2; return 1; }
+
+  if [[ "$target" == "$MARIADB_DATABASE" ]]; then
+    echo "!! target is the LIVE database ($target). It will be dropped and replaced."
+    read -r -p "Type the database name again to confirm: " confirm
+    [[ "$confirm" == "$target" ]] || { echo "aborted."; return 1; }
+  fi
+
+  echo "==> recreating $target"
+  mysql_as_root "-e \"DROP DATABASE IF EXISTS \\\`$target\\\`; CREATE DATABASE \\\`$target\\\` DEFAULT CHARSET=utf8mb4;\""
+  echo "==> restoring $file into $target"
+  zcat "$file" | docker_run "docker compose exec -T -e MYSQL_PWD=\"\$MARIADB_ROOT_PASSWORD\" \
+    mariadb mysql -uroot \"$target\""
+  echo "OK restored into $target"
+}
+
+# The actual F3 gate: prove a dump restores, without endangering the live DB.
+cmd_verify() {
+  local file="${1:-}"
+  [[ -n "$file" && -f "$file" ]] || { echo "usage: wd-backup verify <file.sql.gz>" >&2; return 1; }
+  local scratch="wd_restore_check_$$"
+
+  echo "==> verifying $file via scratch database $scratch"
+  cmd_restore "$file" "$scratch" >/dev/null
+
+  local q="SELECT
+    (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='%s'),
+    (SELECT COUNT(*) FROM %s.items),
+    (SELECT COUNT(*) FROM %s.spells_new),
+    (SELECT COUNT(*) FROM %s.npc_types),
+    (SELECT COUNT(*) FROM %s.wd_migration);"
+
+  local live scratch_counts
+  # shellcheck disable=SC2059
+  live=$(mysql_as_root "--batch --skip-column-names -e \"$(printf "$q" "$MARIADB_DATABASE" "$MARIADB_DATABASE" "$MARIADB_DATABASE" "$MARIADB_DATABASE" "$MARIADB_DATABASE")\"")
+  # shellcheck disable=SC2059
+  scratch_counts=$(mysql_as_root "--batch --skip-column-names -e \"$(printf "$q" "$scratch" "$scratch" "$scratch" "$scratch" "$scratch")\"")
+
+  echo
+  printf '%-12s %-20s %s\n' '' "live ($MARIADB_DATABASE)" "restored"
+  paste <(printf 'tables\nitems\nspells\nnpc_types\nwd_migration\n') \
+        <(printf '%s' "$live" | tr '\t' '\n') \
+        <(printf '%s' "$scratch_counts" | tr '\t' '\n') \
+    | awk -F'\t' '{printf "%-12s %-20s %s%s\n", $1, $2, $3, ($2==$3 ? "" : "   <-- MISMATCH")}'
+  echo
+
+  echo "==> dropping scratch database $scratch"
+  mysql_as_root "-e \"DROP DATABASE IF EXISTS \\\`$scratch\\\`;\""
+
+  if [[ "$live" == "$scratch_counts" ]]; then
+    echo "PASS — the dump restores to an identical row count."
+  else
+    echo "FAIL — restored database does not match live." >&2
+    return 1
+  fi
+}
+
+# Delete dumps older than N days. Only ever touches files this script names.
+cmd_prune() {
+  local days="${1:-14}" dir="$BACKUP_DIR"
+  [[ -d "$dir" ]] || { echo "nothing to prune"; return 0; }
+  echo "==> pruning wd-*.sql.gz older than $days days in $dir"
+  find "$dir" -maxdepth 1 -name 'wd-*.sql.gz' -type f -mtime "+$days" -print -delete
+  echo "OK  $(find "$dir" -maxdepth 1 -name 'wd-*.sql.gz' | wc -l) dump(s) retained"
+}
+
+case "${1:-}" in
+  dump)    shift; cmd_dump "$@" ;;
+  restore) shift; cmd_restore "$@" ;;
+  verify)  shift; cmd_verify "$@" ;;
+  prune)   shift; cmd_prune "$@" ;;
+  *) sed -n '3,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

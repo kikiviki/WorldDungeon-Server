@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+#
+# wd-baseline — snapshot pristine stock tables before WorldDungeon rewrites them.
+#
+#   wd-baseline take <label> <table> [table...]   snapshot named tables
+#   wd-baseline list                              show existing baselines
+#   wd-baseline restore-table <file> <table>      restore ONE table into a scratch db
+#
+# Why this is separate from wd-backup:
+#
+#   The nightly job prunes `wd-*.sql.gz` after 14 days. A pristine pre-modification
+#   baseline must outlive that, so these are written as `baseline-*.sql.gz` and are
+#   NEVER touched by prune. Losing the stock spells_new after gutting class
+#   assignments would mean reinstalling PEQ to get it back.
+#
+# These are permanent reference artifacts. Do not delete them by hand.
+
+set -euo pipefail
+
+STACK="${STACK_DIR:-/opt/eqemu-servers/akk-stack}"
+DEST="${WD_BASELINE_DIR:-/home/eqdev/Dropbox/eqemu/eq-serv-backup/baselines}"
+
+cd "$STACK"
+set -a; . ./.env; set +a
+export MARIADB_ROOT_PASSWORD MARIADB_DATABASE
+
+docker_run() {
+  if docker info >/dev/null 2>&1; then bash -c "$1"; else sg docker -c "$1"; fi
+}
+
+cmd_take() {
+  local label="${1:-}"; shift || true
+  if [[ -z "$label" || $# -eq 0 ]]; then
+    echo "usage: wd-baseline take <label> <table> [table...]" >&2; return 1
+  fi
+  label="$(printf '%s' "$label" | tr ' ' '-' | tr -cd '[:alnum:]_-')"
+
+  mkdir -p "$DEST"
+  local out="$DEST/baseline-${label}-$(date +%Y-%m-%d).sql.gz"
+  if [[ -e "$out" ]]; then
+    echo "refusing to overwrite an existing baseline: $out" >&2
+    echo "baselines are permanent; pick a different label." >&2
+    return 1
+  fi
+
+  echo "==> snapshotting: $*"
+  docker_run "docker compose exec -T -e MYSQL_PWD=\"\$MARIADB_ROOT_PASSWORD\" \
+    mariadb mysqldump -uroot --lock-tables=false --single-transaction \
+    \"\$MARIADB_DATABASE\" $*" | gzip > "$out"
+
+  if ! gzip -t "$out" || ! zcat "$out" | tail -5 | grep -q 'Dump completed'; then
+    echo "FAILED: snapshot invalid or truncated — removing $out" >&2
+    rm -f "$out"; return 1
+  fi
+
+  # Record what's inside, so a future session doesn't have to open the gzip.
+  {
+    echo "baseline: $label"
+    echo "taken:    $(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "database: $MARIADB_DATABASE"
+    echo "tables:   $*"
+    echo "sha256:   $(sha256sum "$out" | cut -d' ' -f1)"
+    echo
+  } >> "$DEST/MANIFEST.txt"
+
+  chmod 444 "$out"   # read-only: these are reference artifacts
+  echo "OK  $out  ($(du -h "$out" | cut -f1))"
+}
+
+cmd_list() {
+  [[ -d "$DEST" ]] || { echo "no baselines yet"; return 0; }
+  ls -lh "$DEST"/baseline-*.sql.gz 2>/dev/null || echo "no baselines yet"
+  echo
+  [[ -f "$DEST/MANIFEST.txt" ]] && cat "$DEST/MANIFEST.txt"
+}
+
+# Restore into a scratch database so stock rows can be diffed against live
+# without touching live. Never restores over the real database.
+cmd_restore_table() {
+  local file="${1:-}" table="${2:-}"
+  [[ -n "$file" && -f "$file" && -n "$table" ]] || {
+    echo "usage: wd-baseline restore-table <file.sql.gz> <table>" >&2; return 1; }
+  local scratch="wd_baseline_ref"
+
+  echo "==> restoring $table from $file into scratch database $scratch"
+  docker_run "docker compose exec -T -e MYSQL_PWD=\"\$MARIADB_ROOT_PASSWORD\" \
+    mariadb mysql -uroot -e \"DROP DATABASE IF EXISTS \\\`$scratch\\\`; CREATE DATABASE \\\`$scratch\\\`;\""
+  zcat "$file" | docker_run "docker compose exec -T -e MYSQL_PWD=\"\$MARIADB_ROOT_PASSWORD\" \
+    mariadb mysql -uroot \"$scratch\""
+  echo "OK — stock rows are in $scratch.$table, live is untouched."
+  echo "Diff example:"
+  echo "  SELECT COUNT(*) FROM $scratch.$table s JOIN $MARIADB_DATABASE.$table l USING(id);"
+}
+
+case "${1:-}" in
+  take)          shift; cmd_take "$@" ;;
+  list)          shift; cmd_list "$@" ;;
+  restore-table) shift; cmd_restore_table "$@" ;;
+  *) sed -n '3,7p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

@@ -7568,7 +7568,7 @@ bool Mob::ImprovedTaunt(){
 }
 
 
-bool Mob::PassCastRestriction(int value)
+bool Mob::PassCastRestriction(int value, int32 wd_spellgroup)
 {
 	/*
 		Restriction ID corresponds to the type 39 value in dstr_us on live clients (2021). See enum SpellRestriction for full list.
@@ -8509,6 +8509,17 @@ bool Mob::PassCastRestriction(int value)
 		int hp_below_amt = 5 * ((1 + value) - IS_HP_BELOW_5_PCT);
 		if (GetHPRatio() <= hp_below_amt) {
 			return true;
+		}
+	}
+
+	// W1 (WorldDungeon): pass if this mob has an active buff whose spell belongs to
+	// spellgroup wd_spellgroup, which rides in the same effect slot's max field (SPA 442/443).
+	if (value == IS_TARGET_HAS_WD_SPELLGROUP && wd_spellgroup > 0) {
+		int buff_count = GetMaxTotalSlots();
+		for (int i = 0; i < buff_count; i++) {
+			if (IsValidSpell(buffs[i].spellid) && spells[buffs[i].spellid].spell_group == wd_spellgroup) {
+				return true;
+			}
 		}
 	}
 

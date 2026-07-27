@@ -994,7 +994,7 @@ public:
 	int8 GetDecayEffectValue(uint16 spell_id, uint16 spelleffect);
 	int64 GetExtraSpellAmt(uint16 spell_id, int64 extra_spell_amt, int64 base_spell_dmg);
 	void MeleeLifeTap(int64 damage);
-	bool PassCastRestriction(int value);
+	bool PassCastRestriction(int value, int32 wd_spellgroup = 0);
 	void SendCastRestrictionMessage(int requirement_id, bool is_target_requirement = true, bool is_discipline = false);
 	bool ImprovedTaunt();
 	bool TryRootFadeByDamage(int buffslot, Mob* attacker);

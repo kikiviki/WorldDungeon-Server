@@ -40,8 +40,11 @@ Status: `open` · `in-progress` · `blocked` · `done`
 | ✅ **F4 build loop** | Edit → ninja → restart → zone boots, proved once and reverted. Commands in *Environment notes* below. |
 | ✅ **Stage 2 spikes** | S1/S2/S3 answered — see [STAGE-2-SPIKES.md](STAGE-2-SPIKES.md). **W6 closed**, W5/W7 shrank, W11 grew. |
 | ✅ **A1 qglobal schema** | [A1-QGLOBAL-SCHEMA.md](A1-QGLOBAL-SCHEMA.md) + migration `0002`. The `options = 5` scoping rule is the load-bearing detail. |
-| 🚧 **P1 in progress** | `feature/p1-cleric-monk`. Verification done ([P1-SOURCE-VERIFICATION.md](P1-SOURCE-VERIFICATION.md)); Cleric mantles authored as Mk. I/II/III (migration `0004`). **Untested in-game.** |
-| 🔧 **First engine code** | **Not yet written.** Stage 1 will be the first. |
+| 🚧 **P1 unblocked, awaiting an in-game run** | `feature/p1-cleric-monk`. Two blockers found and both fixed: the spell pipeline was dead (migration `0008`) and the mantle stacking mechanism could not work (**W13**, built + deployed) — [P1-STACKING-DEFECT.md](P1-STACKING-DEFECT.md). See *Next session*. Verification done ([P1-SOURCE-VERIFICATION.md](P1-SOURCE-VERIFICATION.md)); Cleric mantles authored as Mk. I/II/III (migration `0004`). **Still untested in-game.** Heal lines (spells 4–11) authored as migration `0005` — **written and SQL-validated (rollback test), deliberately NOT applied until the `0004` gate passes.** |
+| ✅ **Caster spell design docs** | All eleven caster classes designed in [spells/](spells/) — 330 spells, id bands, spellgroups, engine deps per class. Cleric picked as first implementation per the README's review order. |
+| 🔧 **First engine code** | ✅ **W1 built and compiled** — `IS_TARGET_HAS_WD_SPELLGROUP = 60000` (F1's id 1000 collided with stock; corrected). Untested in-game; see W1. |
+| 🔧 **W13 stance exclusivity** | ✅ **built and deployed.** `WD_EXCLUSIVE_SPELLGROUP_BASE = 500000` + one check in `Mob::CheckStackConflict()`. Replaces the matching-layout model, which could not work. See [P1-STACKING-DEFECT.md](P1-STACKING-DEFECT.md). |
+| ✅ **Spell pipeline unblocked** | Migration `0008`. `shared_memory` had been aborting on a NULL varchar since the first custom row existed, so **no custom spell had ever reached a zone**. Now `Loaded [40,734]` = stock + 12. |
 
 **`feature/foundations` is merged and done** (PR #1). Delivered: **F1 ✅ · F2 ✅ · F3 ✅ · F4 ✅ ·
 S1 ✅ · S2 ✅ · S3 ✅ · A1 ✅.**
@@ -66,29 +69,108 @@ See F3. Nothing on the board is waiting on a decision.
 
 **Everything below is on `feature/p1-cleric-monk`.** Branch from `custom` for anything unrelated.
 
-### 🔴 The gate: run the test matrix
+### The gate: two defects found, one fixed
 
-Nothing further should be authored until this passes. Migration `0004` created the Cleric's three
-mantles at Mk. I/II/III; **none of it has been seen by a running zone.**
+Attempting to run the `0004` test matrix surfaced two problems. **The first is fixed and the
+pipeline is unblocked. The second is a design contradiction and needs a decision.**
 
-1. **Regenerate shared memory and restart** — spells live in shared memory, so new rows are
-   invisible to zones until then. (`#reloadspells` may suffice; untested here.)
-2. Run the five-step matrix in the header of
-   [`0004_cleric_mantles_mk1to3.sql`](../../worlddungeon/migrations/0004_cleric_mantles_mk1to3.sql).
+#### ✅ 1. The spell pipeline was dead — fixed by migration `0008`
 
-**Step 3 is the whole gate:** cast *Zealot Mk. I* while *Standard Mk. III* is active. It **must**
-take hold. That is the SPA 149 rider overriding the engine's normal "reject the weaker spell"
-behaviour. If it fails, SPA 149 does not work as `zone/spells.cpp:3208` reads, and custom C++ or
-Lua becomes the fallback (the owner has said either is acceptable — keep it KISS and performant).
+`shared_memory` was **aborting on every run** with `basic_string: construction from null is not
+valid` while loading spells, and writing no usable spells file. Consequence: **migration `0004`
+had been applied since 12:35 and had never once been seen by a running zone** — not because the
+restart was skipped, but because the loader could not build the file at all.
 
-Also confirm step 6: that the Standard Mantle measurably improves a heal. That proves the focus
-path works end to end.
+Cause: `SharedDatabase::LoadSpells()` (`common/shareddb.cpp:1686-1691`) copies six nullable
+varchar columns — `teleport_zone`, `you_cast`, `other_casts`, `cast_on_you`, `cast_on_other`,
+`spell_fades` — into `std::string` with **no NULL guard**. `0003`/`0004` named none of them, so
+every custom row took the NULL default. **No stock row is NULL in any of the six** (0 of 40,722),
+which is why upstream has never hit this. The query is `ORDER BY id ASC`, so it died on the first
+custom row (42700) — presenting exactly as "all stock spells work, no custom spell exists."
+
+Fixed by [`0008_spell_text_nulls.sql`](../../worlddungeon/migrations/0008_spell_text_nulls.sql)
+(applied). **Standing rule: every `spells_new` INSERT must name all six text columns explicitly,
+even when the value is `''`.** `0005`/`0006`/`0007` still need amending to do so before they are
+applied — `0006` names them for the familiars only.
+
+Also worth knowing: **`~/server/bin` has no `shared_memory` symlink** (only `zone` and `world` are
+linked), so the regeneration step has no tool wired up in the server dir. Run the build output:
+
+```bash
+sg docker -c "docker compose exec -T eqemu-server bash -lc 'cd ~/server && ../code/build/bin/shared_memory'"
+```
+
+**Verified after the fix:** loader completes clean, all 12 custom rows are in `shared/spells`, and
+a restarted zone reports `Loaded [40,734] spells via shared memory` — stock 40,722 **+12**. Custom
+content has now reached a running zone for the first time.
+
+#### 🔴 2. The mantle stacking design cannot work — see [P1-STACKING-DEFECT.md](P1-STACKING-DEFECT.md)
+
+**The two decisions locked last session are mutually exclusive.** "Stance exclusivity = matching
+effect layout" is exactly the condition (`effect_match`, `zone/spells.cpp:3145`) under which the
+engine **skips the SPA 149 block entirely** (`:3164`, `:3269`). The rider is never evaluated
+between the mantles.
+
+Falling through to plain value arbitration, only two of the six populated slots get a vote —
+`177 DoubleAttackChance` and `323 DefensiveProc`; slots 1–3 are in `IsEffectIgnoredInStacking()`
+and SPA 149 is classified **blank**. Traced outcome:
+
+- **step 3 rejected** — slot 5 compares the two proc **spell ids** as magnitudes, `42710 < 42711`
+- **step 4 rejected** — slot 4, `0 < 5`
+- **step 2 and 5 fail the other way** — all voting slots equal, so `return 0` and **two mantle
+  buffs coexist**
+- only step 1 passes
+
+Line 3208 reads correctly; it is simply never reached. **Blast radius includes the Monk dual
+stance pool** (same mechanism, not yet authored) and invalidates two rows of the *Data-only* table
+at the bottom of this file. This is the **second** correction to the same P3.3 assumption — the
+matching-layout model was itself the replacement for the `spellgroup` model that
+[P1-SOURCE-VERIFICATION.md](P1-SOURCE-VERIFICATION.md) §1 disproved.
+
+**There was no data-only way out.** SPA 446-449 — the engine's purpose-built exclusivity chain —
+sit at `zone/spells.cpp:3181-3205`, *inside the same `!effect_match` guard*. Every native
+primitive (148, 149, 446-449) is behind it.
+
+#### ✅ Resolved by W13 — decided, built, deployed
+
+**Two different spells sharing a `spell_group` >= 500,000 are one stance pool: one worn at a time,
+newest always wins.** One check in `Mob::CheckStackConflict()` placed *above* the `effect_match`
+branch, plus `WD_EXCLUSIVE_SPELLGROUP_BASE` in `common/spdat.h`. No new column, no new SPA — F1
+already allocates WD spellgroups from 500,000 and the nine mantles already share `500001`.
+
+Stock is untouched: PEQ's highest `spell_group` is 100,276 and **zero** stock rows reach 500,000.
+The Monk's two pools are simply two spellgroups. **Layout no longer matters to exclusivity**, so
+the fragile unenforced invariant is gone and *"each stance gets its own proc"* is safe again —
+arbitration is bypassed for same-group spells, so the proc-id tiebreak can no longer fire.
+
+Built clean (208/208), deployed, 25 zones up on `Loaded [40,734] spells`. **Still not cast
+in-game** — steps 1–5 of the matrix are now predicted to pass; **step 6 (mantle measurably
+improves a heal) is the one genuinely open question.** See
+[P1-STACKING-DEFECT.md](P1-STACKING-DEFECT.md) §3b and §5.
+
+The in-game run has still not happened — it needs a client and GM `#cast`, since the mantles are
+`classes2 = 254` (AA-granted). Run it to confirm the trace, but expect steps 2–5 to fail; it is
+confirmation, not new information. Step 6 (Standard Mantle measurably improves a heal, proving the
+focus path) is **independent of the defect** and is the one genuinely open question in the matrix.
 
 ### Then, in order
 
-1. **Cleric heal lines** — the four-line model (Cleric §9d/§14d). **This is where the
-   formula/max scaling model actually applies**, unlike the mantles. Use `formula` 101–105 or
-   111/112 with a rising `max` per tier.
+1. ~~**Cleric heal lines**~~ — ✅ **authored** as migration
+   [`0005_cleric_heal_lines.sql`](../../worlddungeon/migrations/0005_cleric_heal_lines.sql)
+   (spells 4–11 × Mk. I/II/III, ids 42,713–42,736, spellgroups 502,001–502,008). Formula 105
+   with tier caps at ~lvl 30 / ~lvl 50 / past-65; HoTs formula 102; Reclamation tiers its
+   recast; Deathward tiers its restored HP. SQL validated via transaction rollback.
+   **Not applied — `wd-migrate up` is gated on the `0004` in-game test matrix.** Numbers are a
+   first-pass tuning surface (see the migration header); review before applying.
+1b. **Wizard** — ✅ **authored** as migrations
+   [`0006_wizard_core.sql`](../../worlddungeon/migrations/0006_wizard_core.sql) (lures 1–4,
+   nukes 5–10 carrying two SPA 374 rider slots each, familiars 24–26, Sculpt Spell 27) and
+   [`0007_wizard_combo_riders.sql`](../../worlddungeon/migrations/0007_wizard_combo_riders.sql)
+   (riders 11–14 + payloads — the P3.1 reference, normative in
+   [DETONATION-PATTERN.md](DETONATION-PATTERN.md)). 58 rows total, SQL validated via rollback,
+   unapplied behind the `0004` gate. `0007`'s test matrix **is** W1's done-when check.
+   **Deferred:** Thermal Shock 15 + Cascade 16 (W1 extension), mana ward 17–19 (W4 pkg),
+   black hole 20–23, Careful Caster 28, ports 29–30, Sculpt→AE-lure gate.
 2. **Cleric smite + recourse, HP buffs, worship lines, health balance** — remembering SPA 153's
    **inverted sign** (positive base = penalty).
 3. **Monk pools** — offense then defense. Each stance needs its **own proc** (decided), and each
@@ -112,10 +194,14 @@ path works end to end.
   Mk. I and it stays relevant because it scales with level and stats; Mk. II lands after a few
   rebirths; Mk. III is the elite chase. **Do not** copy stock's flat 9→10→11 bumps.
 - **Level/stat scaling is primary**, tiers secondary.
-- **Stance exclusivity = matching effect layout** (all 12 `effectid` slots identical), with SPA
-  149 as the mandatory rider wherever parallel tiered lines must swap in both directions.
-- **Each stance gets its own proc** — which also avoids a zero in a proc slot burning a
-  `MAX_AA_PROCS` entry.
+- ~~**Stance exclusivity = matching effect layout**, with SPA 149 as the mandatory rider~~ —
+  🔴 **SUPERSEDED. Both halves were wrong and were mutually exclusive.** Replaced by **W13**:
+  **stance exclusivity = a shared `spell_group` >= 500,000**, enforced in C++. Effect layout is
+  now irrelevant to exclusivity and SPA 149 is not used. See
+  [P1-STACKING-DEFECT.md](P1-STACKING-DEFECT.md).
+- **Each stance gets its own proc** — still holds, and is safe again under W13 (arbitration is
+  bypassed for same-group spells, so the proc slot can no longer act as a tiebreak). Also avoids
+  a zero in a proc slot burning a `MAX_AA_PROCS` entry.
 - **Spell ids must stay under 45,000** (ROF2 client cap). Revised bands are in
   [F1-ID-RANGES.md](F1-ID-RANGES.md). Three tiers is what makes the budget fit — ~1,270 needed
   against ~2,398 available, so **stock-id reuse is headroom, not a dependency.**
@@ -131,8 +217,8 @@ path works end to end.
 - **Branch `custom` is the working branch, and `origin/custom` and `origin/master` are currently
   identical** — foundations was merged into `master` via PR #1, then `custom` was
   fast-forwarded to match. Branch from `custom`.
-- Still **zero changes to engine source**, so `git diff upstream/master -- zone/ common/` is
-  still empty. Stage 1 will be the first thing to change that.
+- **W1 is the first engine change**: `common/spdat.h`, `zone/mob.h`, `zone/mob.cpp`,
+  `zone/spell_effects.cpp`. Built clean and deployed to the running server (symlinked build).
 
 #### Build / run loop (proved in F4)
 
@@ -400,7 +486,22 @@ What was actually run:
 All three are **S**, mutually independent, and unblock more than anything else on the board.
 One branch, one build, one test pass.
 
-### W1 — Spellgroup-on-target cast restriction · **S** · open · *depends: F1*
+### W1 — Spellgroup-on-target cast restriction · **S** · ✅ **built — untested in-game** · *depends: F1*
+
+**Implemented and compiled** (the first engine change on the board):
+
+- `common/spdat.h` — `IS_TARGET_HAS_WD_SPELLGROUP = 60000`. ⚠️ **F1's allocated id `1000` was
+  already taken** by stock `IS_BETWEEN_LEVEL_1_AND_75`; F1 corrected, 60,000–60,999 reserved
+  as the WD custom-restriction band.
+- `zone/spell_effects.cpp` `Mob::PassCastRestriction()` — new optional `wd_spellgroup`
+  parameter + buff-array scan comparing each buff's `spells[].spell_group`.
+- `zone/mob.cpp` `TryTriggerOnCastRequirement()` — the SPA 442/443 evaluation site now passes
+  the slot's `max` field through as the spellgroup.
+
+**Authoring shape for a detonator:** SPA 442, base = payload spell id, limit = 60000,
+max = target spellgroup (e.g. 512,001 fire lures). Engine fires the payload on the buffed
+mob and fades the 442 carrier. **Done-when criterion (fails unbuffed / lands buffed) still
+needs an in-game check** — fold it into the `0004` test-matrix session.
 
 **Unblocks:** Wizard, Necromancer, Rogue, Druid, Berserker, Beastlord, Enchanter, Paladin (8)
 
@@ -419,6 +520,23 @@ enum stays clean and there's no ceiling on spellgroup count.
 
 **Done when:** a detonator spell fails on an unbuffed target and lands on a buffed one, with
 no per-class C++.
+
+### W13 — Stance exclusivity by spellgroup · **S** · ✅ **built and deployed — untested in-game** · *no dependencies*
+
+**Unblocks:** Cleric mantles, Monk dual stance pool, and every future stance or pool system.
+
+`WD_EXCLUSIVE_SPELLGROUP_BASE = 500000` (`common/spdat.h`) plus one check in
+`Mob::CheckStackConflict()` (`zone/spells.cpp`), sited **above** the `effect_match` branch: two
+different spells sharing a `spell_group` at or above the base are one pool — one worn, newest
+wins, magnitude not consulted.
+
+Exists because the matching-layout model could not work: every native exclusivity primitive
+(SPA 148, 149, 446-449) sits inside `if (!effect_match)`, which a shared layout switches off.
+Full analysis in [P1-STACKING-DEFECT.md](P1-STACKING-DEFECT.md).
+
+**Done when:** casting Zealot Mk. I over an active Standard Mk. III leaves exactly one mantle
+buff — matrix step 3, with `share WorldDungeon exclusivity group [500001], overwriting` in the
+zone log.
 
 ### W2 — Ally-target expansion (primer P3.6) · **S** · open · *no dependencies*
 
@@ -560,10 +678,17 @@ wrong, find out on two classes, not sixteen.
 **Depends: W1, P1.** Once the restriction exists and the pipeline is proven, this is spell
 authoring, not code.
 
-### P2 — Wizard · **M** · open
+### P2 — Wizard · **M** · in-progress
 
 **Build first as the reference template** (vault C13). Every later detonation class copies its
 shape.
+
+**Authored** (migrations `0006` + `0007`, unapplied — see *Next session*): lures, nukes,
+familiars, Sculpt Spell, and the combo riders 11–14 with payloads — the full detonation chain
+in data on top of W1. **The P3.1 reference template is written up in
+[DETONATION-PATTERN.md](DETONATION-PATTERN.md)** — every later combo class copies that doc,
+not the migrations. Remaining Wizard scope: Thermal Shock + Cascade (W1 extension), mana ward
+(W4 pkg), black hole, Careful Caster, ports, and the Sculpt→AE-lure gate.
 
 ### P3 — Necromancer, Rogue, Druid, Berserker, Beastlord, Enchanter · **M each** · open
 
@@ -761,8 +886,8 @@ Recorded so nobody re-opens them:
 
 | Design element | Mechanism |
 |---|---|
-| Stances, one-at-a-time (primer P3.3) | ⚠️ **NOT `spellgroup`** — see [P1-SOURCE-VERIFICATION.md](P1-SOURCE-VERIFICATION.md) §1. Use matching effect/slot layout, or SPA 148/446-449. Still data-only. |
-| Monk dual stance pool | ⚠️ **NOT two spellgroups** — same correction as above. Two *layout families*. Still data-only. |
+| Stances, one-at-a-time (primer P3.3) | 🔴 **REOPENED — matching layout does not work either.** See [P1-STACKING-DEFECT.md](P1-STACKING-DEFECT.md). Identical layouts *disable* the SPA 149 rider. SPA 148/446-449 or a small C++ check are the live candidates; **may not stay data-only.** (`spellgroup` was already ruled out — [P1-SOURCE-VERIFICATION.md](P1-SOURCE-VERIFICATION.md) §1.) |
+| Monk dual stance pool | 🔴 **REOPENED** — inherits the above, twice. Do not author until the stance mechanism is settled. |
 | 1–10 tier lines (D2) | Higher rank overwrites lower — **unaffected** by the §1 correction, though it works via effect/slot comparison, not spellgroup |
 | Bard group lifesteal | SPA 178 as a buff — each member taps for themselves (V3) |
 | Ward fires on depletion, not just timeout | SPA 373 `CastOnFadeEffectAlways` (V2) |
