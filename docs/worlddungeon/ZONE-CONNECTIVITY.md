@@ -125,6 +125,60 @@ nearer `nexus` (16) than `poknowledge` (34), which is a travel terminal rather t
 
 ---
 
+## Visual map: `zone-map-graph.py`
+
+Renders the graph with **real zone geometry** — each node is the zone's actual Brewall map,
+headed `shortname (id)`, wired with connections read live from the database.
+
+```bash
+docs/worlddungeon/tools/zone-map-graph.py --from blackburrow --depth 2 -o bb.html
+docs/worlddungeon/tools/zone-map-graph.py --zones sro,ruja,rujb,rujc
+docs/worlddungeon/tools/zone-map-graph.py --all --engine sfdp --limit 0 -o world.html
+```
+
+Output is one self-contained HTML file — inline SVG, drag to pan, scroll to zoom, hover an
+edge for the mechanism and the door/point name. No external assets, nothing cached.
+
+| Line | Meaning |
+|---|---|
+| Solid blue | zoneline — walk through |
+| Dashed amber | clicky portal or destination door |
+| Dotted violet | quest-script port |
+| Arrowheads | direction of travel; two-way connections get both ends |
+
+Where a pair has several mechanisms the strongest wins the styling — walking beats clicking —
+so `blackburrow ↔ jaggedpine` draws solid even though it also has the ruby clicky. The hover
+tooltip lists every mechanism regardless.
+
+Same-name map files are stacked: `acrylia.txt`, `acrylia_1.txt`, `acrylia_2.txt` are one node.
+
+**469 of 618 zones have Brewall maps**; the rest (mostly instanced content) are skipped and
+reported. The full world takes ~12s and produces a ~5 MB file. Dense dungeon maps are
+decimated to `--max-segments` per zone, dropping the *shortest* segments so the silhouette
+survives.
+
+### Coordinates — the part that bites
+
+**Brewall map files store negated world coordinates:** `map(x,y) = -db(x,y)`. Verified against
+`zone_points` — `blackburrow → everfrost` is `db(-345.2, 94.5)`, and the map's
+`to_Everfrost_Peaks` marker sits at `(343.7, -90.1)`.
+
+In map space **+x is east and −y is north**, so map coordinates plot *directly* into SVG
+(which is y-down) with north up and east right — no transform at all. Confirmed against known
+geography rather than assumed:
+
+| Zone | Exit | Position in range | Expected |
+|---|---|---|---|
+| `freportw` | East Commonlands | 2% of x | west ✓ |
+| `ecommons` | West Freeport | 97% of x | east ✓ |
+| `oasis` | North Ro | 3% of y | north ✓ |
+| `oasis` | South Ro | 70% of y | south ✓ |
+| `qeytoqrg` | Western Karana | 92% of x | east of Qeynos ✓ |
+
+Database coordinates are negated on the way in, so DB overlays line up with map geometry.
+
+---
+
 ## Output files
 
 `dump-zone-graph.sh` writes to its output directory:
