@@ -81,8 +81,33 @@ The point of all this is that the custom layer is reproducible:
 make init-peq-database && ./worlddungeon/bin/wd-migrate up
 ```
 
-Stock PEQ, then every custom migration in order. See backlog **F3** for the backup/restore
-discipline that proves this path actually works.
+Stock PEQ, then every custom migration in order.
+
+---
+
+## Backups (F3)
+
+**Do not use `make mysql-backup` — it is broken.** It writes the dump as root inside the
+container and then fails to `mv` it out on the host, leaving a large root-owned file stranded in
+the MariaDB data directory and no backup on disk. Use `wd-backup`, which streams to the host
+instead:
+
+```bash
+./worlddungeon/bin/wd-backup dump
+```
+
+```bash
+./worlddungeon/bin/wd-backup verify backup/database/wd-peq-<timestamp>.sql.gz
+```
+
+`verify` restores into a scratch database, compares row counts against live, and drops the
+scratch — it never touches the live database. `restore` requires you to name the target database
+explicitly, and prompts twice if that target is the live one.
+
+**Note:** the stack's scheduled backups (`backup/backup-database.sh` via the `backup-cron`
+container) are **Dropbox-only and not currently running** — no container, and the script aborts
+without a `~/.dropbox_uploader` config. Until a schedule is agreed, backups are manual. See
+backlog F3.
 
 ---
 

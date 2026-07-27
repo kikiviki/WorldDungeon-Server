@@ -40,11 +40,23 @@ Status: `open` · `in-progress` · `blocked` · `done`
 (S1/S2/S3). No engine source touched on this branch; the spikes are read-only source analysis
 whose only job is to shrink the Stage 3/6/7 bill before anyone writes C++.
 
-Progress: **F1 ✅ · F4 ✅ · S1 ✅ · S2 ✅ · S3 ✅ — remaining: F2, then F3.**
+Progress: **F1 ✅ · F2 ✅ · F3 ✅ · F4 ✅ · S1 ✅ · S2 ✅ · S3 ✅ — fork scope complete.**
 
-The spikes paid for themselves: **W6 is closed entirely**, W5 → XS, W7 → S, W10 → XS, and one
-vault assumption (V20, SPA 270 as aura range) turned out to be wrong before anyone built against
-it. See [STAGE-2-SPIKES.md](STAGE-2-SPIKES.md).
+**Stage 0 is closed and Stage 2 is closed.** Nothing on the board is gated on foundations any
+more. The next move is the parallel split: **Stage 1 (W1+W2+W3)** as one engine branch, and
+**A1 → A2** on the script side. **P1 (Cleric + Monk)** is also unblocked now that F2/F3 exist,
+and it's the item that proves F1 and F2 were right.
+
+Two things this fork produced that change other items:
+
+- **The spikes paid for themselves.** **W6 is closed entirely**, W5 → XS, W7 → S, W10 → XS, W11
+  → M+. One vault assumption (V20, SPA 270 as aura range) was simply wrong and is now corrected
+  before anyone built against it. See [STAGE-2-SPIKES.md](STAGE-2-SPIKES.md).
+- **The backup story was broken in two independent ways** and neither had ever been noticed,
+  because nothing had ever been restored. See F3.
+
+⏳ **One decision is outstanding and belongs to the owner, not the code:** when backups run, and
+whether they leave this box. See F3.
 
 ### Environment notes for a fresh session
 
@@ -137,20 +149,104 @@ Summary of what was settled:
 - **W1's `SpellRestriction` ID: `1000`** — `SpellRestrictionTargetHasSpellGroup`. One id
   permanently; the spellgroup comes from the spell's limit/max field.
 
-### F2 — Repeatable DB migration / seed mechanism · **S–M** · open · *depends: F1*
+### F2 — Repeatable DB migration / seed mechanism · **S–M** · ✅ **done** · *depends: F1*
 
-Custom data must be version-controlled and replayable — a directory of ordered `.sql` files
-in this repo, applied by a script.
+**Built at [`worlddungeon/`](../../worlddungeon/README.md)** — a new **top-level** directory,
+deliberately outside every upstream path so an `upstream/master` merge can never conflict with
+it.
 
-**Why:** without it, custom content exists only as mutations in one MariaDB volume. `make
-init-peq-database` overwrites the database (README §6), the prod box needs the same content
-from scratch, and there's no diff, no review, and no rollback. This is the single highest-risk
-omission in the current plan.
+```
+worlddungeon/
+  bin/wd-migrate      the runner
+  bin/wd-backup       F3's dump/restore/verify
+  migrations/         ordered, immutable .sql
+```
 
-### F3 — Backup and restore discipline · **S** · open · *depends: F2*
+`wd-migrate status | up [--dry-run] | verify | new <name>`. Migrations are applied once in
+numeric order and tracked by **sha256** in a `wd_migration` table, so:
 
-`make mysql-backup` exists. Establish when it runs and prove a restore works *before* there's
-anything worth losing. Confirm F2's seed path reproduces a working DB from empty.
+- an applied file is **immutable** — editing one reports `DRIFTED` and `up` refuses to run;
+- a migration that **fails is not recorded**, so it retries cleanly on the next `up`;
+- a version applied but missing from disk is reported too.
+
+MySQL DDL isn't transactional, so **every migration must be idempotent** — the README spells out
+the patterns, and `new` scaffolds a header that reminds you.
+
+**Verified end to end:** dry-run, apply, idempotent re-run, checksum drift detection, refusal to
+apply on a drifted history, and a deliberately broken migration confirmed *not* recorded as
+applied.
+
+First migration `0001_id_range_registry` puts F1's policy in the DB as `wd_id_range`, plus
+`wd_npc_band` for the per-zone NPC sub-band claims F1 requires.
+
+### F3 — Backup and restore discipline · **S** · ✅ **done (one decision outstanding)** · *depends: F2*
+
+**Restore is proven.** Dump → restore into a scratch database → compare → drop:
+
+| | live (`peq`) | restored |
+|---|---:|---:|
+| tables | 234 | 234 |
+| items | 117,944 | 117,944 |
+| spells | 40,722 | 40,722 |
+| npc_types | 67,530 | 67,530 |
+| `wd_migration` | 1 | 1 |
+
+Run it yourself with `worlddungeon/bin/wd-backup verify <file>` — it uses a scratch database and
+drops it afterwards, so it never endangers the live one.
+
+#### Two things were broken, and F3 is why we know
+
+**1. `make mysql-backup` does not work.** It redirects `mysqldump` to `/var/lib/mysql` *inside*
+the container, then tries to `mv` the result out of `./data/mariadb` on the host. The file is
+written as **root**, the host user is not root, and the move fails with `Permission denied` —
+leaving a **269 MB root-owned dump stranded in the MariaDB data directory** and no backup in
+`backup/database/`. This reproduces on a stock akk-stack checkout. *(The stranded file from the
+test run has been removed.)*
+
+**2. There are currently no automated backups at all.** The `backup-cron` container **is not in
+the running compose stack**, and even if it were, `backup/backup-database.sh` is **Dropbox-only**
+— it dumps to `/tmp` inside the container, uploads, and keeps no local copy. It also opens with
+`validate-dropbox.sh` under `set -e`, so with no `~/.dropbox_uploader` config the whole backup
+**aborts**. Dropbox is not configured here.
+
+So before this item, the situation was: the manual backup was broken, the scheduled backup
+wasn't running, and nothing had ever been restored. Exactly the failure F3 exists to catch, and
+much cheaper to find now than after P1 authors real content.
+
+#### The replacement
+
+`worlddungeon/bin/wd-backup` — streams `mysqldump` to the host over stdout, so nothing is ever
+written inside the container and the ownership bug cannot recur.
+
+| Command | Does |
+|---|---|
+| `dump [file]` | gzipped dump to `backup/database/wd-<db>-<timestamp>.sql.gz` |
+| `restore <file> <db>` | drops and recreates a **named** target; prompts twice if it's the live DB |
+| `verify <file>` | restore to scratch, compare row counts, drop scratch |
+| `prune [days]` | delete `wd-*.sql.gz` older than N days (default 14) |
+
+`dump` rejects its own output if it isn't valid gzip or lacks the `Dump completed` trailer — a
+truncated dump is worse than no dump, because it looks like a backup. Measured: 31 MB gzipped,
+~2 min.
+
+#### ⏳ Outstanding — needs a decision, not code
+
+**When does it run?** Nothing is scheduled yet. The intended line, once approved:
+
+```
+0 4 * * *  cd /opt/eqemu-servers/akk-stack/code && ./worlddungeon/bin/wd-backup dump && ./worlddungeon/bin/wd-backup prune 14
+```
+
+**Not installed** — a host crontab is persistent config and is the user's call. Also worth
+deciding: whether backups should leave this box at all (the Dropbox path exists but is
+unconfigured), because a backup on the same disk as the database is not a backup.
+
+#### Rebuild-from-empty
+
+`make init-peq-database && ./worlddungeon/bin/wd-migrate up` is the documented path, and
+`wd_migration` is itself part of the custom layer, so a reinit wipes it and `up` correctly
+replays from scratch. **The reinit half is not yet exercised** — it destroys the live database,
+so it should be run deliberately rather than as a side effect of this fork.
 
 ### F4 — Prove the full loop once · **S** · ✅ **done** · *no dependencies*
 
