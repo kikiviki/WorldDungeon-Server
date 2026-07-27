@@ -73,10 +73,9 @@ assignment here as it's taken so two work streams can't claim the same block.
 
 | Range | Block | Assigned to | Status |
 |---|---|---|---|
-| `spells_new.id` | 100,000–100,999 | Cleric (P1) | **partly claimed** |
-| ↳ `spells_new.id` | 100,100–100,108 | Cleric mantles, tiers I–III (`0003`) | **claimed** |
-| ↳ `spells_new.id` | 100,109–100,129 | Cleric mantles, tiers IV–X | reserved |
-| ↳ `spells_new.id` | 100,110–100,112 | mantle defensive procs (`0003`) | **claimed** |
+| `spells_new.id` | 42,700–42,708 | Cleric mantles, Mk. I/II/III (`0004`) | **claimed** |
+| `spells_new.id` | 42,710–42,712 | mantle defensive procs (`0004`) | **claimed** |
+| ~~`spells_new.id` 100,000–100,999~~ | — | ~~Cleric~~ — **retired, above the client cap** | void |
 | `spells_new.spellgroup` | 500,001 | `clr_mantle` — the mantle pool (`0003`) | **claimed** |
 | `spells_new.spellgroup` | 500,002–500,004 | mantle proc lines (`0003`) | **claimed** |
 | `spells_new.id` | **110,000–114,999** | **ALL/ALL universal spells** — scroll/drop-earned, not class-gated | reserved |
