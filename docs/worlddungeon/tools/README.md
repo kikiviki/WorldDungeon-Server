@@ -125,6 +125,11 @@ The remaining ~21% fall back to node centres and are drawn **faded, with no dots
 run prints its anchored/total count. In practice: 88% on the full mainland, 100% on most
 small graphs.
 
+Arrowheads and the stub of line inside each node are drawn in a **separate layer above the
+nodes**. They have to be: the anchor is *inside* the box, so anything drawn before the node
+gets painted over and the arrow disappears. Edge lines keep a dark halo so they stay legible
+where they cross an unrelated node.
+
 `--center-edges` reverts to centre-to-centre if you prefer the cleaner look.
 
 ### Worked examples
@@ -184,6 +189,9 @@ content. They're skipped and named on stderr, not silently dropped.
 **`--limit` truncation.** Hitting the cap prints a loud warning — a truncated graph looks *more
 isolated than it is*, which is exactly the wrong impression when hunting islands. If you see
 it while investigating connectivity, re-run with `--limit 0`.
+
+**Dark map colours.** Brewall uses deep blues and greens that vanish at thumbnail size, so
+line colours are scaled up to a brightness floor - hue preserved, brightness lifted.
 
 **Coordinates.** Brewall files store negated world coordinates (`map(x,y) = -db(x,y)`), and in
 map space `+x` is east and `−y` is north, so they plot straight into SVG with north up. Full

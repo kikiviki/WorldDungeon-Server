@@ -174,6 +174,22 @@ def load_anchors():
 _num = re.compile(r"-?\d+(?:\.\d+)?")
 
 
+def brighten(r, g, b, floor=170):
+    """
+    Lift dark map colours so they read on a dark background. Brewall uses a lot
+    of deep blues and greens that are nearly invisible at 5% of screen size.
+    Scales the whole triple so hue is preserved and only brightness changes.
+    """
+    r, g, b = int(r) & 255, int(g) & 255, int(b) & 255
+    peak = max(r, g, b)
+    if 0 < peak < floor:
+        k = floor / peak
+        r, g, b = min(255, int(r * k)), min(255, int(g * k)), min(255, int(b * k))
+    elif peak == 0:
+        r = g = b = floor
+    return "#%02x%02x%02x" % (r, g, b)
+
+
 def load_map(zone, max_segments):
     """
     All z-levels stacked: zone.txt, zone_1.txt, zone_2.txt ...
@@ -192,8 +208,7 @@ def load_map(zone, max_segments):
                 v = _num.findall(line)
                 if len(v) >= 9:
                     x1, y1, _z1, x2, y2, _z2, r, g, b = (float(t) for t in v[:9])
-                    segs.append((x1, y1, x2, y2,
-                                 "#%02x%02x%02x" % (int(r) & 255, int(g) & 255, int(b) & 255)))
+                    segs.append((x1, y1, x2, y2, brighten(r, g, b)))
             elif line[:1] == "P":
                 parts = line.split(",")
                 if len(parts) >= 8:
@@ -381,7 +396,8 @@ def layout(zone_ids, edges, geom, engine, scale):
     if not shutil.which(engine):
         sys.exit(f"graphviz '{engine}' not found - install graphviz")
 
-    lines = ["graph G {", "  overlap=prism; splines=false;", f"  sep=\"+{scale//8}\";"]
+    lines = ["graph G {", "  overlap=prism; splines=false;",
+         f"  sep=\"+{max(30, scale // 3)}\"; esep=\"+{max(14, scale // 8)}\";"]
     for z in sorted(zone_ids):
         w, h = geom[z]["w"] / 72.0, geom[z]["h"] / 72.0
         lines.append(f'  "{z}" [shape=box fixedsize=true width={w:.3f} height={h:.3f}];')
@@ -445,6 +461,27 @@ def anchor_xy(zone, other, geom, pos, anchors):
     return cx - g["w"] / 2 + lx, cy - g["h"] / 2 + ly, True
 
 
+def exit_point(px, py, cx, cy, w, h, tx, ty):
+    """
+    Where the segment from an interior point (px,py) toward (tx,ty) leaves the
+    node box centred at (cx,cy). Used to split an edge into the part outside the
+    node and the part inside it, so the inside part can be drawn back on top.
+    """
+    dx, dy = tx - px, ty - py
+    if dx == 0 and dy == 0:
+        return px, py
+    x0, x1 = cx - w / 2, cx + w / 2
+    y0, y1 = cy - h / 2, cy + h / 2
+    ts = []
+    if dx:
+        ts += [(x0 - px) / dx, (x1 - px) / dx]
+    if dy:
+        ts += [(y0 - py) / dy, (y1 - py) / dy]
+    ts = [t for t in ts if t > 1e-9]
+    t = min(ts) if ts else 0.0
+    return px + dx * t, py + dy * t
+
+
 def clip_to_box(cx, cy, w, h, tx, ty):
     """Point where the ray (cx,cy)->(tx,ty) leaves the box, for arrow placement."""
     dx, dy = tx - cx, ty - cy
@@ -467,6 +504,7 @@ def render(zone_ids, zones, edges, geom, pos, anchors, args):
 
     out = []
     add = out.append
+    over = []      # drawn ABOVE the nodes
 
     # --- edges, drawn under the nodes -------------------------------------
     pairs = defaultdict(set)
@@ -504,23 +542,42 @@ def render(zone_ids, zones, edges, geom, pos, anchors, args):
 
         fwd = any(a == za for a, _b, _t in members)
         rev = any(a == zb for a, _b, _t in members)
-        mk = ""
-        if fwd:
-            mk += f' marker-end="url(#arw-{t})"'
-        if rev:
-            mk += f' marker-start="url(#arwr-{t})"'
         approx = "" if (exact_a and exact_b) else "  [approximate: no exit coords]"
         tip = html.escape(f"{za} <-> {zb}: " + ", ".join(sorted(
             f"{t2} ({detail.get((a, b, t2), '')})" for a, b, t2 in members)) + approx)
-        add(f'<path d="M{a1x - minx:.1f},{a1y - miny:.1f}L{b1x - minx:.1f},{b1y - miny:.1f}" '
-            f'stroke="{colour}" stroke-width="2.2" '
-            f'stroke-opacity="{".85" if (exact_a and exact_b) else ".45"}" '
-            f'{"stroke-dasharray=" + chr(34) + dash + chr(34) if dash else ""}{mk}>'
-            f'<title>{tip}</title></path>')
-        for px, py, ok in ((a1x, a1y, exact_a), (b1x, b1y, exact_b)):
-            if ok:
-                add(f'<circle cx="{px - minx:.1f}" cy="{py - miny:.1f}" r="2.6" '
-                    f'fill="{colour}" fill-opacity=".9"/>')
+        dashattr = f' stroke-dasharray="{dash}"' if dash else ""
+        op = ".8" if (exact_a and exact_b) else ".35"
+
+        # Where the line crosses each node's edge. Everything between those two
+        # points is outside both nodes and can be drawn underneath; the two
+        # stubs from boundary to anchor sit inside a node and must be redrawn on
+        # top, or the node paints over them and the arrowheads vanish.
+        ea = exit_point(a1x, a1y, *pos[za], geom[za]["w"], geom[za]["h"], b1x, b1y)
+        eb = exit_point(b1x, b1y, *pos[zb], geom[zb]["w"], geom[zb]["h"], a1x, a1y)
+
+        # under-layer: the span between the two nodes, with a dark halo so it
+        # stays legible where it crosses an unrelated node
+        seg = (f'M{ea[0] - minx:.1f},{ea[1] - miny:.1f}'
+               f'L{eb[0] - minx:.1f},{eb[1] - miny:.1f}')
+        add(f'<path d="{seg}" stroke="#0b0e13" stroke-width="4.5" stroke-opacity=".55"/>')
+        add(f'<path d="{seg}" stroke="{colour}" stroke-width="1.8" '
+            f'stroke-opacity="{op}"{dashattr}><title>{tip}</title></path>')
+
+        # over-layer: the occluded stubs, arrowheads pointing at the true exit
+        for (bx_, by_), (ax_, ay_), ok, arrow in (
+                (ea, (a1x, a1y), exact_a, rev),      # arrow into za = reverse travel
+                (eb, (b1x, b1y), exact_b, fwd)):     # arrow into zb = forward travel
+            if not ok:
+                continue
+            d = (f'M{bx_ - minx:.1f},{by_ - miny:.1f}L{ax_ - minx:.1f},{ay_ - miny:.1f}')
+            mk = f' marker-end="url(#arw-{t})"' if arrow else ""
+            over.append(f'<path d="{d}" stroke="#0b0e13" stroke-width="4.5" '
+                        f'stroke-opacity=".7" fill="none"/>')
+            over.append(f'<path d="{d}" stroke="{colour}" stroke-width="1.8" '
+                        f'stroke-opacity=".95" fill="none"{dashattr}{mk}>'
+                        f'<title>{tip}</title></path>')
+            over.append(f'<circle cx="{ax_ - minx:.1f}" cy="{ay_ - miny:.1f}" r="3" '
+                        f'fill="{colour}" stroke="#0b0e13" stroke-width="1"/>')
     add("</g>")
 
     # --- nodes ------------------------------------------------------------
@@ -551,7 +608,7 @@ def render(zone_ids, zones, edges, geom, pos, anchors, args):
             by_colour[col].append(f"M{sx1:.0f},{sy1:.0f}L{sx2:.0f},{sy2:.0f}")
         for col, d in by_colour.items():
             add(f'<path d="{"".join(d)}" stroke="{col}" '
-                f'stroke-width="{1.1 / s:.2f}" fill="none" stroke-opacity=".78"/>')
+                f'stroke-width="{1.25 / s:.2f}" fill="none" stroke-opacity=".92"/>')
         if args.labels:
             for mx, my, txt in marks:
                 if txt.lower().startswith("to "):
@@ -559,6 +616,9 @@ def render(zone_ids, zones, edges, geom, pos, anchors, args):
                         f'fill="#ff5c7a"><title>{html.escape(txt)}</title></circle>')
         add("</g></g>")
     add("</g>")
+
+    # arrowheads and exit stubs last, so nodes cannot occlude them
+    add('<g id="edge-tips" fill="none">' + "".join(over) + "</g>")
 
     legend = "".join(
         f'<div><span class="sw" style="border-top-color:{c};'
@@ -590,11 +650,12 @@ body{{margin:0;background:#0e1116;color:#dfe6ef;
 .sw{{display:inline-block;width:26px;border-top:2.5px solid}}
 #hint{{margin-left:auto;color:#66748a}}
 svg{{display:block;width:100vw;height:100vh}}
-.zbox{{fill:#161b23;stroke:#33405420;stroke-width:1}}
-.zhdr{{fill:#1e2735}}
-.zttl{{fill:#e8eef7;font:600 12px ui-monospace,monospace}}
-.zid{{fill:#7d8fa6;font-weight:400}}
-.zone:hover .zbox{{stroke:#7ecbff;stroke-width:2}}
+.zbox{{fill:#131a26;stroke:#4a5d78;stroke-width:1.2}}
+.zhdr{{fill:#31415a}}
+.zttl{{fill:#f2f7ff;font:600 12px ui-monospace,monospace}}
+.zid{{fill:#a8bcd6;font-weight:400}}
+.zone:hover .zbox{{stroke:#7ecbff;stroke-width:2.5}}
+#edge-tips{{pointer-events:none}}
 </style></head><body>
 <div id="bar"><b>Zone graph</b>
 <span>{len(zone_ids)} zones &middot; {len(pairs)} connections</span>
