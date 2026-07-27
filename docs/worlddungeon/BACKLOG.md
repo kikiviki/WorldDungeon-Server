@@ -34,9 +34,13 @@ Status: `open` · `in-progress` · `blocked` · `done`
 | ✅ **Phase 0 source verification** | V1–V5 and V15 answered against the source. See [PHASE-0-SOURCE-VERIFICATION.md](PHASE-0-SOURCE-VERIFICATION.md). Reshaped the C++ bill: W1 is new and now first, W5/W6 shrank, the Ranger de-risked. |
 | ✅ **Zone connectivity mapped** | Four connection mechanisms identified and dumped. See [ZONE-CONNECTIVITY.md](ZONE-CONNECTIVITY.md). |
 | ✅ **Tooling** | [`tools/dump-zone-graph.sh`](tools/dump-zone-graph.sh) and [`tools/zone-map-graph.py`](tools/zone-map-graph.py), documented in [tools/README.md](tools/README.md). |
-| ✅ **F1 measurements** | Max stock IDs pulled from the live DB — see F1 below. The decision is now a five-minute call, not a research task. |
+| ✅ **F1 ID range policy** | **Decided.** See [F1-ID-RANGES.md](F1-ID-RANGES.md). Custom bases fixed, `npc_types` convention kept, `zoneidnumber` ceiling myth busted, qglobal naming and W1's restriction id allocated. |
 
-**Start the next session at F1**, then F2. Both are Stage 0 and block everything else.
+**Current fork: `feature/foundations`** — scope is F1, F4, F2, F3 plus the three Stage 2 spikes
+(S1/S2/S3). No engine source touched on this branch; the spikes are read-only source analysis
+whose only job is to shrink the Stage 3/6/7 bill before anyone writes C++.
+
+**Next up in this fork: F4**, then F2 → F3, then the spikes.
 
 ### Environment notes for a fresh session
 
@@ -101,43 +105,33 @@ graph TD
 author anything without painting ourselves into a corner." Do it first; it is cheap now and
 expensive later.
 
-### F1 — Custom ID range allocation policy · **S** · open · *no dependencies*
+### F1 — Custom ID range allocation policy · **S** · ✅ **done** · *no dependencies*
 
-Reserve and document ID ranges for every custom record type, so custom data never collides
-with stock ROF2 data or with a future upstream merge.
+**Decided and recorded in [F1-ID-RANGES.md](F1-ID-RANGES.md).** That file is now the authority;
+claim blocks there in the same commit that first writes rows into them.
 
-**Why first:** every subsequent item writes rows. Renumbering authored content later means
-rewriting every cross-reference — spell→spellgroup, AA→spell, vendor script→spell id.
+Summary of what was settled:
 
-**Measured against the live database — the research is done, only the decision remains:**
-
-| Table / column | Max stock id | Rows | Proposed custom base |
-|---|---:|---:|---:|
-| `spells_new.id` | 42,602 | 40,722 | 100,000 |
-| `spells_new.spellgroup` | 100,276 | 3,233 groups | 500,000 |
-| `items.id` | 147,494 | 117,944 | 1,000,000 |
-| `aa_ability.id` | 30,195 | 1,568 | 100,000 |
-| `aa_ranks.id` | 49,999 | 6,653 | 100,000 |
-| `doors.id` | 40,569 | 19,249 | 100,000 |
-| `zone_points.id` | 4,519 | 1,831 | 100,000 |
-| `npc_types.id` | 2,000,040 | 67,530 | **see below** |
-
-Two of these need thought rather than a round number:
-
-- **`npc_types.id` is not free-form.** The conventional layout is `zoneidnumber * 1000 + n`,
-  which tooling and quest scripts assume. The observed max of 2,000,040 already exceeds what
-  that convention allows for a 999-max zone id, so the existing data is mixed. **Decide
-  whether to follow the convention** (which ties NPC ids to zone ids and caps at 1,000 NPCs
-  per zone) **or break from it deliberately** and document that choice.
-- **`zone.zoneidnumber` maxes at 999** with 482 used. Whether 999 is a hard ceiling or just
-  convention is **unverified** — worth confirming before A7 allocates zone ids, though ~517
-  free slots is ample for the ~48 hand-authored zones.
-
-Also needs deciding, with no measurement required: qglobal key naming convention, and the
-new `SpellRestriction` ID for W1 (pick from a sparse unused range; the enum is live-derived,
-so avoid anything Live might claim).
-
-Record the chosen numbers in this repo.
+- **Custom bases fixed** for spells (100,000), spellgroups (500,000), items (1,000,000), AA
+  ability/ranks (100,000), doors (100,000), zone_points (100,000).
+- **`npc_types.id` follows the convention** `zoneidnumber * 1000 + n`. The 2,000,040 max turned
+  out to be 27 outlier rows; 67,405 of 67,530 obey it. **No C++ derives zone from NPC id at
+  runtime** — only one optional SQL script does — so the convention is an authoring contract,
+  cheap to keep. The 1,000-per-zone cap isn't a real constraint because `npc_types` rows aren't
+  owned by a zone (`spawn2` carries the `zoneid`), so one row spawns in many zones. Flat
+  overflow range **3,000,000+** is the documented escape hatch. Per-zone band conflict check is
+  mandatory before claiming — there is **no blanket-safe sub-band** (38 zones have stock NPCs at
+  `n >= 500`).
+- **`zoneidnumber` 999 is convention, not a ceiling.** `int32_t` in the repository; the narrowest
+  wire struct is `uint16`, so the protocol ceiling is 65,535. **The zone id is not the
+  constraint — the short name is**, since the server sends `zone_short_name[32]` and the client
+  loads geometry by name. A7 should still allocate below 999 (517 free, ~48 needed).
+  ⚠️ One thing left unproven: whether the ROF2 client keeps its own zone-id table. **A7 must
+  boot one custom zone before authoring all 48.**
+- **qglobal naming:** `wd_<domain>_<key>`, integer values, colon-delimited flat strings where
+  structure is unavoidable, never JSON.
+- **W1's `SpellRestriction` ID: `1000`** — `SpellRestrictionTargetHasSpellGroup`. One id
+  permanently; the spellgroup comes from the spell's limit/max field.
 
 ### F2 — Repeatable DB migration / seed mechanism · **S–M** · open · *depends: F1*
 
