@@ -25,6 +25,40 @@ Status: `open` · `in-progress` · `blocked` · `done`
 
 ---
 
+## Where things stand
+
+**Done so far — no engine code written yet.** Everything to date is investigation and tooling.
+
+| | |
+|---|---|
+| ✅ **Phase 0 source verification** | V1–V5 and V15 answered against the source. See [PHASE-0-SOURCE-VERIFICATION.md](PHASE-0-SOURCE-VERIFICATION.md). Reshaped the C++ bill: W1 is new and now first, W5/W6 shrank, the Ranger de-risked. |
+| ✅ **Zone connectivity mapped** | Four connection mechanisms identified and dumped. See [ZONE-CONNECTIVITY.md](ZONE-CONNECTIVITY.md). |
+| ✅ **Tooling** | [`tools/dump-zone-graph.sh`](tools/dump-zone-graph.sh) and [`tools/zone-map-graph.py`](tools/zone-map-graph.py), documented in [tools/README.md](tools/README.md). |
+| ✅ **F1 measurements** | Max stock IDs pulled from the live DB — see F1 below. The decision is now a five-minute call, not a research task. |
+
+**Start the next session at F1**, then F2. Both are Stage 0 and block everything else.
+
+### Environment notes for a fresh session
+
+- Server is up: 1 `world`, 1 `ucs`, 25 `zone`, on the correct `v16-dev` image.
+- **Docker from a non-interactive shell needs `sg docker -c "..."`** — the `docker` group isn't
+  active until a fresh login (akk-stack README §6). Both tools handle this automatically.
+- Git pushes work from the host without entering the container by pointing at the deploy key:
+  `GIT_SSH_COMMAND="ssh -i /opt/eqemu-servers/akk-stack/assets/ssh/id_ed25519 -o IdentitiesOnly=yes"`
+- Branch `custom`, in sync with `origin/custom`. All work so far is docs and tools — **zero
+  changes to engine source**, so `git diff upstream/master -- zone/ common/` is still empty.
+
+### Corrections to the design vault
+
+Two errors found while working, worth fixing in Obsidian:
+
+- The implementation primer's P4 table list names **`aa_rank`**; the actual table is
+  **`aa_ranks`**. (`aa_ability`, `aa_rank_effects`, `aa_rank_prereqs` are all correct.)
+- Zone counts quoted as 618 are **row** counts. There are **482 distinct zones**; the rest are
+  per-version rows.
+
+---
+
 ## Dependency graph
 
 ```mermaid
@@ -72,16 +106,38 @@ expensive later.
 Reserve and document ID ranges for every custom record type, so custom data never collides
 with stock ROF2 data or with a future upstream merge.
 
-Needs a range decided for: `spells_new.id`, `spells_new.spellgroup`, `items.id`,
-`npc_types.id`, `aa_ability.id`, qglobal key naming convention, and the new
-`SpellRestriction` ID from W1.
-
-**Method:** query the max stock ID in each table on a freshly seeded PEQ database, then start
-custom ranges an order of magnitude clear of it. Record the numbers in this repo, not in
-someone's head.
-
 **Why first:** every subsequent item writes rows. Renumbering authored content later means
 rewriting every cross-reference — spell→spellgroup, AA→spell, vendor script→spell id.
+
+**Measured against the live database — the research is done, only the decision remains:**
+
+| Table / column | Max stock id | Rows | Proposed custom base |
+|---|---:|---:|---:|
+| `spells_new.id` | 42,602 | 40,722 | 100,000 |
+| `spells_new.spellgroup` | 100,276 | 3,233 groups | 500,000 |
+| `items.id` | 147,494 | 117,944 | 1,000,000 |
+| `aa_ability.id` | 30,195 | 1,568 | 100,000 |
+| `aa_ranks.id` | 49,999 | 6,653 | 100,000 |
+| `doors.id` | 40,569 | 19,249 | 100,000 |
+| `zone_points.id` | 4,519 | 1,831 | 100,000 |
+| `npc_types.id` | 2,000,040 | 67,530 | **see below** |
+
+Two of these need thought rather than a round number:
+
+- **`npc_types.id` is not free-form.** The conventional layout is `zoneidnumber * 1000 + n`,
+  which tooling and quest scripts assume. The observed max of 2,000,040 already exceeds what
+  that convention allows for a 999-max zone id, so the existing data is mixed. **Decide
+  whether to follow the convention** (which ties NPC ids to zone ids and caps at 1,000 NPCs
+  per zone) **or break from it deliberately** and document that choice.
+- **`zone.zoneidnumber` maxes at 999** with 482 used. Whether 999 is a hard ceiling or just
+  convention is **unverified** — worth confirming before A7 allocates zone ids, though ~517
+  free slots is ample for the ~48 hand-authored zones.
+
+Also needs deciding, with no measurement required: qglobal key naming convention, and the
+new `SpellRestriction` ID for W1 (pick from a sparse unused range; the enum is live-derived,
+so avoid anything Live might claim).
+
+Record the chosen numbers in this repo.
 
 ### F2 — Repeatable DB migration / seed mechanism · **S–M** · open · *depends: F1*
 
@@ -338,14 +394,32 @@ script.
 
 Open verification: ROF2 skill-cap curves for 51–65; per-character qglobal ceiling enforcement.
 
-### A7 — Zone topology build-out · **L** · open
+### A7 — Zone topology build-out · **M** · open · *was L — reduced*
 
 The v1 slice per *Build Order & MVP*: Kerra → Nexus → first ~5–6 zones of the North/Underrot
 wing (T1–T3), through the Rivervale midpoint safe pocket. **Not** all 15 North zones.
 
-Blocked on vault decisions §1.4–1.6 (zone naming) and the §1.3 bespoke-adjacency audit.
+**Reduced from L to M by the connectivity work.** Bespoke edges need no engine code — they are
+`zone_points` rows (walk-through) and `doors` rows with `opentype` 57–58 (clicky portals),
+which lands them inside **F2's** migration mechanism. See
+[ZONE-CONNECTIVITY.md](ZONE-CONNECTIVITY.md).
+
+**LDoN already ships the hub-and-wing pattern** the design wants: `sro` has ten `opentype` 58
+portals to `ruja`…`rujj`, which nothing else reaches. Copy that shape for Nexus → wing zones.
+
+Still blocked on vault decisions §1.4–1.6 (zone naming). The §1.3 bespoke-adjacency audit is
+now **mechanical**: dump `edges.tsv`, diff the proposed adjacency list against it, and anything
+appearing in both is an accidental live-EQ match to rewire.
+
+Design question this surfaced, worth settling here rather than discovering later: **25% of
+stock connections are one-way**, and 117 zones sit in the mainland cluster without being able
+to round-trip back into it. One-way edges should be a deliberate choice for a Souls-style
+"access is free, power is the wall" world, not inherited from PEQ by accident.
 
 ### A8 — Safe-zone travel and ports · **M** · open · *depends: A7*
+
+Also pure data. `doors.keyitem` gates a portal on an item with automatic key-ring
+registration; qglobal gating from A2/A3 covers the rest.
 
 ### A9 — Recommended-Level gear scaling · **M** · open
 
@@ -360,10 +434,17 @@ v1 wants 2–3 only: Fleer + Bloater + one Warded type.
 
 ## Recommended first moves
 
-1. **F1** and **F4** — today. Neither depends on anything, and F1 gates all authoring.
-2. **F2** — the highest-risk omission on the board.
-3. Then split: **Stage 1 (W1+W2+W3)** as one engine branch, **A1→A2** on the script side.
-4. **Stage 2 spikes** whenever there's an hour spare; they only ever remove work.
+1. **F1** — first thing. The measurements are already in the table above, so this is a
+   decision to make and write down, not research. Two real questions inside it: the
+   `npc_types.id` convention, and whether zone id 999 is a hard ceiling.
+2. **F4** — prove the edit → `n` → `make restart` → zone-boots loop once, before the first
+   real change depends on it.
+3. **F2** — the highest-risk omission on the board. Nothing authored is safe until custom
+   data is replayable from version-controlled SQL.
+4. Then split into two parallel tracks: **Stage 1 (W1+W2+W3)** as one engine branch, and
+   **A1 → A2** on the script side.
+5. **Stage 2 spikes** whenever there's an hour spare; they only ever remove work — they've
+   already shrunk three bill items.
 
 ## Explicitly deferred
 
