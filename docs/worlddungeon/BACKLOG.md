@@ -40,7 +40,7 @@ Status: `open` · `in-progress` · `blocked` · `done`
 (S1/S2/S3). No engine source touched on this branch; the spikes are read-only source analysis
 whose only job is to shrink the Stage 3/6/7 bill before anyone writes C++.
 
-Progress: **F1 ✅ · F2 ✅ · F3 ✅ · F4 ✅ · S1 ✅ · S2 ✅ · S3 ✅ — fork scope complete.**
+Progress: **F1 ✅ · F2 ✅ · F3 ✅ · F4 ✅ · S1 ✅ · S2 ✅ · S3 ✅ · A1 ✅ (bonus) — fork scope complete.**
 
 **Stage 0 is closed and Stage 2 is closed.** Nothing on the board is gated on foundations any
 more. The next move is the parallel split: **Stage 1 (W1+W2+W3)** as one engine branch, and
@@ -523,11 +523,29 @@ pre-50 block stays in the design. See S3.
 
 Runs in parallel with everything above. Only **A3** has a Track B dependency.
 
-### A1 — qglobal schema · **S** · open · *depends: F2*
+### A1 — qglobal schema · **S** · ✅ **done** · *depends: F2*
 
-Key naming, value encoding, and per-character scoping for: Paragon path rank, specialization
-flag, rebirth count, level ceiling, mastery. Design the namespace once — every script below
-reads it.
+**Decided and recorded in [A1-QGLOBAL-SCHEMA.md](A1-QGLOBAL-SCHEMA.md)**, with the
+machine-readable copy seeded by migration `0002_qglobal_key_registry`. Unblocks **A2**, **A6**
+and **W12**.
+
+**The scoping bitmask is the part that will bite otherwise.** `quest_globals` is keyed on
+`charid, npcid, zoneid, name`, and the scope comes from `setglobal`'s `options` argument
+(`zone/questmgr.cpp:1769-1778`): bit 1 = all NPCs, bit 2 = all characters, bit 4 = all zones.
+
+> **Every WorldDungeon entitlement writes with `options = 5`** (`1|4`) and duration `"F"` —
+> this character, any NPC, any zone. That is **not** the default: `options = 0`, which is what
+> you get by omitting the argument, writes a global visible only to the NPC and zone that set
+> it — and the bug won't surface until a *different* vendor tries to read it. **Bit 2 is
+> forbidden**; it would make a per-character entitlement server-wide.
+
+Also settled: `wd_<domain>_<key>` naming, integer values with colon-delimited flat strings only
+where structure is unavoidable (never JSON), and that **an unset global reads as `""`, not `0`
+or `nil`** — so every read needs a default.
+
+Keys: `wd_paragon_path`, `wd_paragon_rank`, `wd_paragon_dip`, `wd_paragon_spec`,
+`wd_rebirth_count`, `wd_level_ceiling`, and the `wd_mastery_<class>` family. Path and rank are
+deliberately **separate** keys so A3 doesn't parse a string on every spell-scribe check.
 
 ### A2 — Paragon path AA → qglobal flip · **M** · open · *depends: A1*
 
