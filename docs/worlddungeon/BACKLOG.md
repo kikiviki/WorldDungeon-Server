@@ -38,7 +38,7 @@ Status: `open` · `in-progress` · `blocked` · `done`
 | ✅ **F2 migrations** | [`worlddungeon/`](../../worlddungeon/README.md) — `wd-migrate`, sha256-tracked, immutable once applied. Custom data is now version-controlled and replayable. |
 | ✅ **F3 backup / restore** | `wd-backup`, and a **restore actually proven** (234 tables, identical counts). Found `make mysql-backup` broken and no automated backups running at all. |
 | ✅ **F4 build loop** | Edit → ninja → restart → zone boots, proved once and reverted. Commands in *Environment notes* below. |
-| ✅ **Stage 2 spikes** | S1/S2/S3 answered — see [STAGE-2-SPIKES.md](STAGE-2-SPIKES.md). **W6 closed**, W5/W7/W10 shrank, W11 grew, one vault assumption corrected. |
+| ✅ **Stage 2 spikes** | S1/S2/S3 answered — see [STAGE-2-SPIKES.md](STAGE-2-SPIKES.md). **W6 closed**, W5/W7 shrank, W11 grew. |
 | ✅ **A1 qglobal schema** | [A1-QGLOBAL-SCHEMA.md](A1-QGLOBAL-SCHEMA.md) + migration `0002`. The `options = 5` scoping rule is the load-bearing detail. |
 | 🔧 **First engine code** | **Not yet written.** Stage 1 will be the first. |
 
@@ -50,8 +50,8 @@ See *Next session* below for what to pick up.
 
 Two things that fork produced which change other items:
 
-- **The spikes paid for themselves.** **W6 is closed entirely**, W5 → XS, W7 → S, W10 → XS, W11
-  → M+. One vault assumption (V20, SPA 270 as aura range) was simply wrong and is now corrected
+- **The spikes paid for themselves.** **W6 is closed entirely**, W5 → XS, W7 → S, W11 → M+ (W10 was
+  briefly recorded as XS in error and is back at S). One vault assumption (V20, SPA 270 as aura range) was simply wrong and is now corrected
   before anyone built against it. See [STAGE-2-SPIKES.md](STAGE-2-SPIKES.md).
 - **The backup story was broken in two independent ways** and neither had ever been noticed,
   because nothing had ever been restored. See F3.
@@ -494,10 +494,12 @@ useful for a cooldown but not as a scaling stat.
 > additive term in C++**. Either fold that into W11 or drop pre-50 block from the design — but
 > don't author spells against SPA 188 expecting them to matter. **W11: M → M+.**
 
-**V20 is wrong.** SPA 270 is `BardSongRange` (`common/spdat.h:1333`), not aura range. **Aura
-radius is the `auras.distance` DB column** — squared once at load (`zone/aura.cpp:967`), so
-author plain radii in world units. The E4 scope filter is likewise a column, `auras.spawn_type`.
-**W10: S → XS**, essentially no engine work. *Correct the vault's Bard Aura Patch.*
+**V20 stands — an earlier revision of this entry wrongly said otherwise.** SPA 270 is
+`BardSongRange` (`common/spdat.h:1333`), and that is exactly what the *Bard Aura Patch* uses it
+for. The patch does **not** use the `auras` table; it projects songs from the spellbar as
+permanent buffs in C++ and range-gates group members. **W10 stays S — no reduction, no vault
+correction owed.** (Separately: aura *entity* radius is `auras.distance`, squared at load in
+`zone/aura.cpp:967` — relevant only to features that use aura entities, which W10 does not.)
 
 ---
 
@@ -617,11 +619,12 @@ direction parameter; derive Human Shield from it (vault C1).
 one item with real performance-budget risk; see the vault's *Performance Budget &
 Determinism Rules*.
 
-### W10 — Bard aura projection · **XS** · open · *S3 done — reduced from S*
+### W10 — Bard aura projection · **S** · open · *S3 done — scope unchanged*
 
-Range is the `auras.distance` column (squared at load, `zone/aura.cpp:967` — author plain radii)
-and the E4 scope filter is `auras.spawn_type`. Essentially no engine work. **The vault's *Bard
-Aura Patch* names SPA 270 for range and is wrong** — 270 is `BardSongRange`. Fix it in Obsidian.
+A real C++ patch: reconcile the active song-aura set against the spellbar each pass, apply
+beneficial songs as permanent buffs via `AddBuff` (never touching the song pulse system), and
+range-gate group members. Fully specced in the vault's *Bard Aura Patch*, whose use of **SPA 270
+`BardSongRange`** for the range bonus is **correct**. Add the E4 scope filter.
 
 ### W11 — AC / avoidance cap override · **M+** · open · *S3 done — grew*
 

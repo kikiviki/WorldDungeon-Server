@@ -169,7 +169,17 @@ Two escape hatches, both already in the source:
 > is required in C++**. Either fold it into W11 or drop pre-50 block from the design. Don't
 > author spells against 188 expecting them to matter.
 
-### S3b — SPA 270 is *not* aura range. V20's assumption is wrong.
+### S3b — SPA 270 is bard **song** range (V20 stands; my first reading of it did not)
+
+> [!warning] **Corrected 2026-07-27.** An earlier revision of this file claimed V20 was wrong and
+> that W10 shrank to XS because "aura radius is the `auras.distance` column". **That conclusion
+> was mistaken.** It was drawn from the backlog's one-line summary of V20 rather than from the
+> *Bard Aura Patch* itself. Reading the patch: it does **not** use the `auras` table at all. It is
+> a custom C++ patch that projects beneficial bard songs from the spellbar as permanent buffs,
+> range-gating group members. In that design **SPA 270 `BardSongRange` is exactly the right
+> effect** and the vault uses it correctly. **W10 remains an S-sized C++ item, not XS.**
+> The `auras.distance` facts below are accurate but describe the *aura-entity* system, which W10
+> does not use.
 
 **SPA 270 is `BardSongRange`** (`common/spdat.h:1333`) — "increase range of beneficial bard
 songs", documented at `zone/client_mods.cpp:1490` with Sionachie's Crescendo as the example. It
@@ -192,9 +202,9 @@ aura applies to, surfaced as `AuraSpawns::GroupMembers` and friends (`zone/aura.
 
 ### Verdict
 
-- **W10 (bard aura projection) shrinks to near-zero engine work.** Range and scope are both DB
-  columns. Whatever the vault's *Bard Aura Patch* says about SPA 270, **it is describing the
-  wrong SPA** and should be corrected in Obsidian.
+- **W10 is unchanged at S.** It is a real C++ patch (spellbar reconcile pass + range-gated
+  projection), and its use of SPA 270 is correct. **No vault correction is owed.** The
+  `auras.distance` detail is useful only if some *other* feature uses aura entities.
 - **W11 grows slightly** — it now owns the flat-additive block term, if pre-50 block is wanted.
 
 ---
@@ -207,11 +217,11 @@ aura applies to, surfaced as `AuraSpawns::GroupMembers` and friends (`zone/aura.
 | W5 threshold trigger | S | **XS** — one SPA id + one predicate, reusing `TryTriggerThreshHold` |
 | W6 wizard mana ward | S | **closed** — covered by SPA 457 `ResourceTap` |
 | W7 swarm extensions | M | **S** — death hook already exists; 2 real sub-items left |
-| W10 bard aura | S | **XS** — range and scope are DB columns, not SPAs |
+| W10 bard aura | S | **S — unchanged.** (An earlier revision wrongly reduced this to XS.) |
 | W11 AC/avoidance cap | M | **M+** — inherits the flat block term, if pre-50 block is wanted |
 
 ## Corrections owed to the design vault
 
-1. **V20 is wrong.** SPA 270 is `BardSongRange`, not aura range. Aura radius is `auras.distance`.
-2. **V6's pre-50 concern is confirmed and worse than assumed.** SPA 188 is multiplicative on
+1. **V6's pre-50 concern is confirmed and worse than assumed.** SPA 188 is multiplicative on
    block skill, so it is near-useless at low skill. Heroic DEX is the only additive term.
+2. ~~V20 is wrong~~ — **withdrawn, V20 is correct.** See the correction box in S3b.
