@@ -40,7 +40,11 @@ Status: `open` · `in-progress` · `blocked` · `done`
 (S1/S2/S3). No engine source touched on this branch; the spikes are read-only source analysis
 whose only job is to shrink the Stage 3/6/7 bill before anyone writes C++.
 
-**Next up in this fork: F4**, then F2 → F3, then the spikes.
+Progress: **F1 ✅ · F4 ✅ · S1 ✅ · S2 ✅ · S3 ✅ — remaining: F2, then F3.**
+
+The spikes paid for themselves: **W6 is closed entirely**, W5 → XS, W7 → S, W10 → XS, and one
+vault assumption (V20, SPA 270 as aura range) turned out to be wrong before anyone built against
+it. See [STAGE-2-SPIKES.md](STAGE-2-SPIKES.md).
 
 ### Environment notes for a fresh session
 
@@ -148,13 +152,33 @@ omission in the current plan.
 `make mysql-backup` exists. Establish when it runs and prove a restore works *before* there's
 anything worth losing. Confirm F2's seed path reproduces a working DB from empty.
 
-### F4 — Prove the full loop once · **S** · open · *no dependencies*
+### F4 — Prove the full loop once · **S** · ✅ **done** · *no dependencies*
 
-Edit → `n` → `make restart` → zone boots → nonzero item count, per README §4. Do it once as a
-gate so the first real change isn't also the first time the toolchain is exercised.
+**The toolchain works end to end.** Exercised once as a gate, then reverted — no engine source
+changed on this branch.
 
-Note the README's warning: a clean compile is not a working server. Check a **zone** log for
-`Loaded [117,944] items`; world reporting `Loaded [0] items` is normal.
+What was actually run:
+
+1. Edited `common/shareddb.cpp:913`, appending a `[WD-F4-PROBE]` marker to the item-load line.
+2. Built in-container: `docker compose exec eqemu-server bash -lc 'cd ~/code/build && ninja -j$(nproc-2)'`
+   — 12 targets relinked, exit 0, ~4 min.
+3. `./bin/spire spire:launcher restart` from `~/server`.
+4. Verified in the zone logs: `Loaded [117,944] items via shared memory [WD-F4-PROBE]`,
+   in **25 of 25** zone logs.
+5. Reverted, rebuilt, restarted — 25 zone processes back up, marker gone, item count unchanged.
+
+**Facts worth keeping for the next session:**
+
+- The build command is the container alias **`n`** = `cd ~/code/build && ninja -j$(expr $(nproc) - 2)`.
+  `~/code` in the container is a bind mount of this repo, so a host-side edit is immediately
+  visible and the container sees the same git branch.
+- **`~/server/bin/zone` and `~/server/bin/world` are symlinks into `~/code/build/bin/`**, so a
+  successful ninja build is live at the next restart — no install or copy step, and no
+  `create-symlinks.pl` run needed for an incremental change.
+- Restart is `./bin/spire spire:launcher restart`, not `make restart`, and takes ~45s for all
+  25 zones to come back.
+- The README warning holds: check a **zone** log, not world. World reporting `Loaded [0] items`
+  is normal.
 
 ---
 
@@ -214,21 +238,56 @@ Cheap source reads that prevent building things the engine already has. Phase 0 
 bill items were over-scoped; these check the rest. **No dependencies — can run any time,
 including during Stage 1.**
 
-### S1 — Threshold / resource SPA gap analysis · **S** · open
+**All three answered — full evidence in [STAGE-2-SPIKES.md](STAGE-2-SPIKES.md).** They removed
+more work than expected and corrected one design assumption that was flatly wrong.
 
-SPAs 450, 451, 452, 453, 454 and 457 are marked implemented and cover part of W5 and possibly
-all of W6. Determine the gap: the design needs *"below X% max HP"*, while 453/454 are *"single
-hit over X damage"*. **Gates W4/W5/W6 scope.**
+### S1 — Threshold / resource SPA gap analysis · **S** · ✅ **done**
 
-### S2 — Swarm-pet death hook · **S** · open
+`Mob::TryTriggerThreshHold()` (`zone/spell_effects.cpp:9761`) is already called from inside
+`Mob::CommonDamage()` (`zone/attack.cpp:4171`, `:4196`) and already scans buffs, fades the source
+buff, and casts a payload with beneficial/detrimental routing. **The only difference from what
+W5 needs is the predicate** — it tests `damage > limit_value[i]` where the design wants a
+resulting-HP-ratio test.
 
-Not found in Phase 0. Gates the Enchanter's count-driven survival buff. Start at
-`StartSwarmTimer()` and the `SwarmPet` struct. **Gates W7 scope.**
+- **W5: S → XS.** One new SPA id plus one new predicate, reusing the function wholesale. Use the
+  *projected* ratio `(GetHP() - damage) * 100 / GetMaxHP()`, because HP isn't subtracted until
+  `zone/attack.cpp:~4265`. Copy the edge-triggered shape already at `:4292` so it fires on
+  *crossing* the threshold, not on every hit while below it.
+- **W6: closed.** SPA 457 `ResourceTap` is the same operation as the Wizard mana ward. Reopen
+  only if authoring hits a wall.
+- **W4: unchanged**, and now the only genuinely new mechanism in Stage 3 — nothing in the stock
+  SPAs banks a *cumulative* total that something else can read.
 
-### S3 — Block-chance SPA and aura range · **S** · open
+### S2 — Swarm-pet death hook · **S** · ✅ **done**
 
-Vault V6 (block-chance SPA number, pre-50 viability) and V20 (SPA 270 aura-range assumption).
-**Gates W10 and W11 scope.**
+**It already exists.** Phase 0 missed it because it isn't near `StartSwarmTimer()` — it's in
+`NPC::Death()` at `zone/attack.cpp:2542`, which already resolves the owner and decrements
+`TempPetCount`. The Enchanter buff needs one call at a site that has the owner in hand.
+
+Hook **attack.cpp:2545 only** — the other two `SetTempPetCount(-1)` sites (`zone/npc.cpp:3266`,
+`zone/pets.cpp:327`) mean "expired" and "torn down". A survival buff that fires on the duration
+running out is the opposite of the intent.
+
+**W7: M → S.** Three of five sub-items are now free; only the doppleganger runtime spell list and
+Necro target inheritance remain.
+
+### S3 — Block-chance SPA and aura range · **S** · ✅ **done**
+
+**V6 — block is SPA 188 `IncreaseBlockChance`, and it is multiplicative on block skill**
+(`zone/attack.cpp:537-546`): `chance = (GetSkill(SkillBlock) + 100) * (1 + bonus/100) / 25`. At
+skill 0 that's 4%, and +100% from SPA 188 buys four percentage points. **It is weakest exactly
+where the design wants block to matter.** Also gated on `CanThisClassBlock()`. The only additive
+term is Heroic DEX; `IncreaseBlockChance == 10000` is an exact-match guaranteed-block sentinel,
+useful for a cooldown but not as a scaling stat.
+
+> **Decision forced, and it belongs to W11:** a meaningful pre-50 block layer needs a **flat
+> additive term in C++**. Either fold that into W11 or drop pre-50 block from the design — but
+> don't author spells against SPA 188 expecting them to matter. **W11: M → M+.**
+
+**V20 is wrong.** SPA 270 is `BardSongRange` (`common/spdat.h:1333`), not aura range. **Aura
+radius is the `auras.distance` DB column** — squared once at load (`zone/aura.cpp:967`), so
+author plain radii in world units. The E4 scope filter is likewise a column, `auras.spawn_type`.
+**W10: S → XS**, essentially no engine work. *Correct the vault's Bard Aura Patch.*
 
 ---
 
@@ -251,17 +310,18 @@ Track how much a buff has absorbed or dealt. No native equivalent.
   would churn on every swing — do not use them here.
 - Readout: on fade via SPA 373 (confirmed to fire on depletion) or on detonation via W1.
 
-### W5 — Threshold trigger (primer P3.4) · **S** · open · *depends: S1*
+### W5 — Threshold trigger (primer P3.4) · **XS** · open · *S1 done — reduced from S*
 
 **Unblocks:** Necromancer (life ward), Shadowknight (Famine stance), Berserker (execute)
 
-Build only S1's identified gap: a post-damage HP-ratio check in `Mob::CommonDamage()` firing a
-dormant buff's payload.
+One new SPA id plus one new predicate in `Mob::TryTriggerThreshHold()`
+(`zone/spell_effects.cpp:9761`), which already does the buff scan, fade and payload routing. Use
+the projected ratio and the edge-triggered shape at `zone/attack.cpp:4292`. See S1.
 
-### W6 — Wizard mana ward conversion · **S** · open · *depends: S1*
+### W6 — Wizard mana ward conversion · ~~**S**~~ · ✅ **closed — not needed** · *S1*
 
-Same hook. May be fully covered by SPA 457 `ResourceTap` — S1 decides whether this item exists
-at all.
+Covered by SPA 457 `ResourceTap`, which converts a % of DD/DoT damage to hp/mana/endurance —
+the same operation. Reopen only if authoring an actual mana-ward spell hits a wall.
 
 ---
 
@@ -305,9 +365,9 @@ damage.
 
 **Depends: S2, and Stage 5 for the affected classes' non-swarm halves.**
 
-### W7 — Swarm AI extensions (primer P3.5) · **M** · open · *reduced scope*
+### W7 — Swarm AI extensions (primer P3.5) · **S** · open · *reduced again by S2*
 
-Two of four documented sub-items are already handled (see V4):
+Three of five documented sub-items are already handled (V4, plus S2):
 
 - ~~Independent caps per swarm subtype~~ — **free.** Caps are per-cast; no cross-cast
   accounting exists (`zone/aa.cpp:114`).
@@ -321,7 +381,12 @@ Genuinely remaining:
   allow-list of categories. Seam exists at the per-cast `NPCType` copy (`zone/aa.cpp:103-109`).
 - **Necro target inheritance / xtarget-clearing.** Target-lock is the opposite behaviour.
   Needs "acquire the owner's next target after the current dies."
-- **Swarm-pet death hook** — per S2.
+
+And one more is now free:
+
+- ~~Swarm-pet death hook~~ — **already built.** `NPC::Death()` at `zone/attack.cpp:2542` already
+  resolves the owner and decrements the count. Hook that site only, not the expiry/teardown
+  ones. See S2.
 
 ### P5 — Necro minions, Enchanter dopplegangers, Ranger warhorns, Rogue clone · open
 
@@ -342,13 +407,19 @@ direction parameter; derive Human Shield from it (vault C1).
 one item with real performance-budget risk; see the vault's *Performance Budget &
 Determinism Rules*.
 
-### W10 — Bard aura projection · **S** · open · *depends: S3*
+### W10 — Bard aura projection · **XS** · open · *S3 done — reduced from S*
 
-Already fully specced in the vault's *Bard Aura Patch*. Add the E4 scope filter.
+Range is the `auras.distance` column (squared at load, `zone/aura.cpp:967` — author plain radii)
+and the E4 scope filter is `auras.spawn_type`. Essentially no engine work. **The vault's *Bard
+Aura Patch* names SPA 270 for range and is wrong** — 270 is `BardSongRange`. Fix it in Obsidian.
 
-### W11 — AC / avoidance cap override · **M** · open · *depends: S3*
+### W11 — AC / avoidance cap override · **M+** · open · *S3 done — grew*
 
 **Unblocks:** all classes. Per *Combat Balance Envelope* §11.8.
+
+**Now also owns the flat additive block term**, if pre-50 block is to mean anything: SPA 188 is
+multiplicative on block skill and buys ~4 percentage points at skill 0. Decide here whether
+pre-50 block stays in the design. See S3.
 
 ---
 
