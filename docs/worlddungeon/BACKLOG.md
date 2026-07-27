@@ -40,6 +40,7 @@ Status: `open` · `in-progress` · `blocked` · `done`
 | ✅ **F4 build loop** | Edit → ninja → restart → zone boots, proved once and reverted. Commands in *Environment notes* below. |
 | ✅ **Stage 2 spikes** | S1/S2/S3 answered — see [STAGE-2-SPIKES.md](STAGE-2-SPIKES.md). **W6 closed**, W5/W7 shrank, W11 grew. |
 | ✅ **A1 qglobal schema** | [A1-QGLOBAL-SCHEMA.md](A1-QGLOBAL-SCHEMA.md) + migration `0002`. The `options = 5` scoping rule is the load-bearing detail. |
+| 🚧 **P1 in progress** | `feature/p1-cleric-monk`. Verification done ([P1-SOURCE-VERIFICATION.md](P1-SOURCE-VERIFICATION.md)); Cleric mantles authored as Mk. I/II/III (migration `0004`). **Untested in-game.** |
 | 🔧 **First engine code** | **Not yet written.** Stage 1 will be the first. |
 
 **`feature/foundations` is merged and done** (PR #1). Delivered: **F1 ✅ · F2 ✅ · F3 ✅ · F4 ✅ ·
@@ -63,60 +64,62 @@ See F3. Nothing on the board is waiting on a decision.
 
 ## Next session
 
-Foundations are done, so the board splits into two tracks that should run **in parallel**. The
-design's own warning applies: *the common failure mode is sinking months into Track B and having
-nothing playable.* If only one thing gets done, make it P1.
+**Everything below is on `feature/p1-cleric-monk`.** Branch from `custom` for anything unrelated.
 
-### 1. P1 — Cleric + Monk · **M** · 🚧 *in progress on `feature/p1-cleric-monk`* · Track A
+### 🔴 The gate: run the test matrix
 
-**Source-verification pass done first** — see [P1-SOURCE-VERIFICATION.md](P1-SOURCE-VERIFICATION.md).
-It found that **`spellgroup` does not drive buff stacking**, contradicting the mechanism the
-Monk's dual-pool system and the Cleric's mantles were both specced on, and that **SPA 153's tier
-curve runs the opposite sign** to the Cleric's §9e. Both features survive as data-only; the
-authoring shape changes. **Read that file before writing spells.**
+Nothing further should be authored until this passes. Migration `0004` created the Cleric's three
+mantles at Mk. I/II/III; **none of it has been seen by a running zone.**
 
-The MVP critical path, and **the first content that proves F1 and F2 were actually right**.
-Neither class needs any custom C++. Between them they exercise nearly every data mechanism the
-other 14 classes need — the Cleric the spell/heal/AA pipeline, the Monk stances, spellgroups and
-disciplines. If the ID ranges or the migration mechanism are wrong, find out on two classes
-rather than sixteen.
+1. **Regenerate shared memory and restart** — spells live in shared memory, so new rows are
+   invisible to zones until then. (`#reloadspells` may suffice; untested here.)
+2. Run the five-step matrix in the header of
+   [`0004_cleric_mantles_mk1to3.sql`](../../worlddungeon/migrations/0004_cleric_mantles_mk1to3.sql).
 
-Shape of the work, all inside `worlddungeon/migrations/`:
+**Step 3 is the whole gate:** cast *Zealot Mk. I* while *Standard Mk. III* is active. It **must**
+take hold. That is the SPA 149 rider overriding the engine's normal "reject the weaker spell"
+behaviour. If it fails, SPA 149 does not work as `zone/spells.cpp:3208` reads, and custom C++ or
+Lua becomes the fallback (the owner has said either is acceptable — keep it KISS and performant).
 
-1. `wd-migrate new cleric_spells` — claim spell block **100,000–100,999** in
-   [F1-ID-RANGES.md](F1-ID-RANGES.md) in the same commit.
-2. Same for the Monk at **101,000–101,999**, plus its two stance spellgroups
-   (`monk_offense` / `monk_defense`) from the 500,000 spellgroup base.
-3. Apply, restart, verify in-game.
+Also confirm step 6: that the Standard Mantle measurably improves a heal. That proves the focus
+path works end to end.
 
-Watch for: stances rely on native same-`spellgroup`/same-rank overwrite, and tier lines on ranks
-1–10 — both are data-only per the table at the end of this file. Don't write C++ for either.
+### Then, in order
 
-### 2. Stage 1 — W1 + W2 + W3 · **S each** · Track B
+1. **Cleric heal lines** — the four-line model (Cleric §9d/§14d). **This is where the
+   formula/max scaling model actually applies**, unlike the mantles. Use `formula` 101–105 or
+   111/112 with a rising `max` per tier.
+2. **Cleric smite + recourse, HP buffs, worship lines, health balance** — remembering SPA 153's
+   **inverted sign** (positive base = penalty).
+3. **Monk pools** — offense then defense. Each stance needs its **own proc** (decided), and each
+   pool needs its shared layout budgeted *before* any of it is authored.
 
-One branch, one build, one test pass. Mutually independent and they unblock more than anything
-else on the board. **W1 alone unblocks 8 classes** and its `SpellRestriction` id (`1000`) is
-already allocated. F4 proved the build loop, so this is now a ~4 minute rebuild per iteration.
+### Open items carried forward
 
-### 3. A2 — Paragon AA → qglobal · **M** · Track A
+| Item | Note |
+|---|---|
+| **`not_focusable` column unidentified** | The spdat struct calls it field 197 but ordinal 198 here is `not_extendable`. Left unset — default 0 is what we want — but **find it before authoring any non-focusable spell.** |
+| GCD / recast on same-layout overwrite | Decides how fluid stance swapping feels. Unverified. |
+| Recourse behaviour on partial resist | Cleric smite. Unverified. |
+| Focus effects select one best/worst, they don't sum | So Zealot's negative SPA 125 and a heal-focus AA will **not** simply add. Needs a design pass before mantle numbers are final. |
+| Darkvision SPA (Badger) | Low priority. |
+| Weapon types vs. §2.1 | Design question, not source. |
 
-Unblocked by A1. The front half of the delivery spine. **Every write must use `options = 5`**
-and duration `"F"` — see [A1-QGLOBAL-SCHEMA.md](A1-QGLOBAL-SCHEMA.md), which is emphatic about
-why the default of `0` is a trap.
+### Decisions locked this session
 
-### Cheap fillers
-
-**A4** (token item + drops, **S**, needs only F1) and **W12** (rebirth unlock, **S**, needs only
-A1) are both one-sitting items if there's an hour spare.
-
-### Suggested branches
-
-- `feature/p1-cleric-monk` — data only, no engine source
-- `feature/stage-1-engine` — W1 + W2 + W3 together
-
-They touch disjoint files and can be worked in either order or at once.
-
----
+- **Mk. I / II / III — three tiers**, `rank` 1 / 5 / 10 (the stock convention).
+- **Tiers raise the ceiling, not the floor** — same `formula`, higher `max`. Most players live on
+  Mk. I and it stays relevant because it scales with level and stats; Mk. II lands after a few
+  rebirths; Mk. III is the elite chase. **Do not** copy stock's flat 9→10→11 bumps.
+- **Level/stat scaling is primary**, tiers secondary.
+- **Stance exclusivity = matching effect layout** (all 12 `effectid` slots identical), with SPA
+  149 as the mandatory rider wherever parallel tiered lines must swap in both directions.
+- **Each stance gets its own proc** — which also avoids a zero in a proc slot burning a
+  `MAX_AA_PROCS` entry.
+- **Spell ids must stay under 45,000** (ROF2 client cap). Revised bands are in
+  [F1-ID-RANGES.md](F1-ID-RANGES.md). Three tiers is what makes the budget fit — ~1,270 needed
+  against ~2,398 available, so **stock-id reuse is headroom, not a dependency.**
+- **ALL/ALL and AA-granted spells** have their own ranges and their own stacking rules.
 
 ### Environment notes for a fresh session
 
