@@ -67,7 +67,13 @@ Foundations are done, so the board splits into two tracks that should run **in p
 design's own warning applies: *the common failure mode is sinking months into Track B and having
 nothing playable.* If only one thing gets done, make it P1.
 
-### 1. P1 — Cleric + Monk · **M** · Track A · ⭐ *do this one*
+### 1. P1 — Cleric + Monk · **M** · 🚧 *in progress on `feature/p1-cleric-monk`* · Track A
+
+**Source-verification pass done first** — see [P1-SOURCE-VERIFICATION.md](P1-SOURCE-VERIFICATION.md).
+It found that **`spellgroup` does not drive buff stacking**, contradicting the mechanism the
+Monk's dual-pool system and the Cleric's mantles were both specced on, and that **SPA 153's tier
+curve runs the opposite sign** to the Cleric's §9e. Both features survive as data-only; the
+authoring shape changes. **Read that file before writing spells.**
 
 The MVP critical path, and **the first content that proves F1 and F2 were actually right**.
 Neither class needs any custom C++. Between them they exercise nearly every data mechanism the
@@ -749,9 +755,9 @@ Recorded so nobody re-opens them:
 
 | Design element | Mechanism |
 |---|---|
-| Stances, one-at-a-time (primer P3.3) | Same `spellgroup`, same rank — native overwrite |
-| Monk dual stance pool | Two spellgroups, `monk_offense` / `monk_defense` |
-| 1–10 tier lines (D2) | `spellgroup` ranks 1–10, higher auto-overwrites |
+| Stances, one-at-a-time (primer P3.3) | ⚠️ **NOT `spellgroup`** — see [P1-SOURCE-VERIFICATION.md](P1-SOURCE-VERIFICATION.md) §1. Use matching effect/slot layout, or SPA 148/446-449. Still data-only. |
+| Monk dual stance pool | ⚠️ **NOT two spellgroups** — same correction as above. Two *layout families*. Still data-only. |
+| 1–10 tier lines (D2) | Higher rank overwrites lower — **unaffected** by the §1 correction, though it works via effect/slot comparison, not spellgroup |
 | Bard group lifesteal | SPA 178 as a buff — each member taps for themselves (V3) |
 | Ward fires on depletion, not just timeout | SPA 373 `CastOnFadeEffectAlways` (V2) |
 | Ranger archery specialization (E6) | Real archery — full impl + Lua bindings (V15) |
