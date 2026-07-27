@@ -40,6 +40,10 @@ assignment here as it's taken so two work streams can't claim the same block.
 | ↳ `spells_new.id` | 100,110–100,112 | mantle defensive procs (`0003`) | **claimed** |
 | `spells_new.spellgroup` | 500,001 | `clr_mantle` — the mantle pool (`0003`) | **claimed** |
 | `spells_new.spellgroup` | 500,002–500,004 | mantle proc lines (`0003`) | **claimed** |
+| `spells_new.id` | **110,000–114,999** | **ALL/ALL universal spells** — scroll/drop-earned, not class-gated | reserved |
+| `spells_new.id` | **115,000–119,999** | **AA-granted spell-like abilities** | reserved |
+| `spells_new.spellgroup` | **510,000–519,999** | ALL/ALL lines | reserved |
+| `spells_new.spellgroup` | **520,000–529,999** | AA-granted ability lines | reserved |
 | `spells_new.id` | 101,000–101,999 | Monk (P1) | unclaimed |
 | `spells_new.id` | 102,000–102,999 | Wizard (P2 — reference detonation template) | unclaimed |
 | `items.id` | 1,000,000–1,000,999 | A4 tokens | unclaimed |
@@ -173,6 +177,44 @@ spellgroup is required; *which* spellgroup is read from the spell's limit/max fi
 
 ---
 
+---
+
+## Two delivery classes beyond the per-class blocks
+
+The per-class blocks (100,000–109,999) cover spells a class learns as that class. Two other
+kinds of spell exist and need their own space, because they are **not** class-scoped and would
+otherwise be impossible to audit apart from class content.
+
+### ALL/ALL universal spells — `110,000–114,999`
+
+Earned by item, drop or purchase (a *Scroll of Poke I* grants *Poke I*), usable regardless of
+class. In the data these set **all sixteen `classesN` columns to a real level**, not 254 —
+254 means AA-granted and would make the scroll unscribable.
+
+> ⚠️ **Stacking hazard, and it is the reason these get their own range.** An ALL/ALL buff will be
+> on the same character as class buffs, cast by a class that was never considered when the class
+> buff was authored. Per the taxonomy in migration `0003`:
+> - ALL/ALL **instant** spells — safe, no interaction possible.
+> - ALL/ALL **buffs** — must be given a **deliberately distinct effect layout** from any class
+>   pool, or they will land in case-2 value comparison against a class buff and one will silently
+>   reject the other. **Never reuse a class pool's layout for an ALL/ALL buff.**
+> - An ALL/ALL buff meant to be *exclusive* with something is case 3 and needs the SPA 149 rider.
+>
+> Practical rule: **give every ALL/ALL buff line its own spellgroup in 510,000+ and its own
+> layout.** If two ALL/ALL lines are meant to compete with each other, that is a pool, and pools
+> follow the stance rules.
+
+### AA-granted spell-like abilities — `115,000–119,999`
+
+The spell behind an activated AA. These use **`classesN = 254`** (granted, never scribed), which
+is the convention stock stance rows already follow and what migration `0003`'s mantles use.
+
+Kept separate from both the class blocks and ALL/ALL because they are **reachable only through
+`aa_rank_effects`** — if an AA row is wrong the spell is simply unreachable, and having them in
+one contiguous range makes that class of bug findable with a single join.
+
+---
+
 ## Rules
 
 1. **Never author a custom row below its custom base.** No exceptions, including "just for a
@@ -180,3 +222,6 @@ spellgroup is required; *which* spellgroup is read from the spell's limit/max fi
 2. **Claim the block in this file in the same commit** that first writes rows into it.
 3. **A new custom record type gets its range added here before its first row exists.**
 4. All of it lands as ordered `.sql` under **F2**. Nothing is hand-mutated in the live DB.
+5. **A spell's delivery mechanism decides its range**, not its theme: class-scoped → the class
+   block; scroll/drop-earned and classless → ALL/ALL; reachable only via an AA → AA-granted.
+   A *Scroll of Poke* that only Clerics can read is a **Cleric** spell, not ALL/ALL.
