@@ -147,23 +147,80 @@ fire (`IsValidSpell(0)` is false) but it burns a limited resource and hides real
 **Consequence for the Monk offense pool:** Dragon's melee proc **cannot** sit in a shared layout
 alongside three stances that don't proc.
 
-**Recommended resolution — give every offense stance a real proc.** It's the option that keeps
-the layout legal *and* improves the design: Ostrich/Gorilla/Hummingbird each get a thematic
-low-magnitude proc instead of a dead slot. Dragon stays the proc-focused one via magnitude and
-rate, not by being the only one with the effect.
+**✅ DECIDED — every stance gets its own proc.** This keeps the layout legal (no slot sits at 0)
+*and* reads better: each stance procs something thematic, and Dragon stays the proc-focused one
+through magnitude and rate rather than by being the only one with the effect.
 
 **Rule for authoring any pool: only put an SPA in a shared layout if value 0 is a true no-op.**
 Verified safe at 0: **220** (skill damage), **119** (attack speed), **3** (movement), **173**
 (riposte), **59** (damage shield). Verified unsafe at 0: **85** / **323** (proc registration —
 both write a spell id into a bounded proc array).
 
+---
+
+## 7. 🔴 Tiered stances break plain matching-layout — use SPA 149
+
+**Raised by the tier model: Stance A I…X, Stance B I…X, Stance C I…X per pool.** That model is
+fine, but it collides with how same-layout overwrite resolves.
+
+Once two spells are "the same line", `CheckStackConflict` compares their effect values slot by
+slot and (`zone/spells.cpp:~3389`):
+
+```cpp
+if (sp2_value < sp1_value) {
+    LogSpells("Spell [{}] (value [{}]) is not as good as [{}] (value [{}]). Rejecting [{}]", ...);
+    // -> rejected
+}
+```
+
+**A weaker buff is rejected outright.** With **Ostrich VII** active, casting **Gorilla II** does
+nothing — the game refuses it as a downgrade.
+
+**Why this matters here and not in stock EQ:** stock stance lines are one line tiering upward, so
+"reject the weaker one" is correct. WorldDungeon has **four parallel lines in one pool at
+independent ranks**, which is exactly the case that rule punishes. Uneven rank progression is
+guaranteed — Paragon investment concentrates ranks in one stance — so a player who ranks Ostrich
+hard becomes **locked out of their other three stances** until they grind those up. The stance
+you invested in becomes a trap, which inverts the intended sense of achievement.
+
+### Fix: SPA 149 `StackingCommand_Overwrite` as a rider on every stance
+
+`common/spdat.h:1212`; handler at `zone/spells.cpp:3208`:
+
+```cpp
+overwrite_effect     = sp2.base_value[i];    // which effect id to look for
+overwrite_slot       = sp2.formula[i] - 201; // which slot (1-based in data)
+overwrite_below_value = sp2.max_value[i];    // overwrite if existing value is below this
+if (sp1.effect_id[overwrite_slot] == overwrite_effect && sp1_value < overwrite_below_value)
+    // -> overwrite
+```
+
+**Give every stance in a pool an identical SPA 149 slot** pointing at the pool's slot-1 effect
+with `max_value` set **above any tier-X value** (e.g. 999999). Every stance then unconditionally
+overwrites any pool sibling at any rank, in either direction. Tier upgrades still work, and
+**downgrade-swaps work too**.
+
+This keeps the layout approach — it's the escape hatch already noted as the fallback, now
+promoted to **mandatory for any pool with parallel tiered lines**.
+
+**Layout cost:** one more shared slot. Revised pool layouts below reserve slot 5 for it.
+
+**Author one pool and test the swap matrix before writing 40 spells:** rank a stance to III, keep
+a sibling at I, and confirm the swap works both directions.
+
 ### Draft pool layouts
 
 | Pool | Slot 1 | Slot 2 | Slot 3 | Slot 4 | 5–12 |
 |---|---|---|---|---|---|
-| `monk_offense` | 220 skill dmg | 119 attack speed | 85 proc *(all four need a real proc)* | 3 movement | 254 |
-| `monk_defense` | 173 riposte | 59 damage shield | 323 def. proc *(same caveat)* | 3 movement | 254 |
-| `clr_mantle` | 125 heal focus | 132 mana cost | 220 melee dmg | 177 double attack | 254 |
+| `monk_offense` | 220 skill dmg | 119 attack speed | 85 proc — **each stance its own** | 3 movement | **149 overwrite-rider** → slots 6–12 = 254 |
+| `monk_defense` | 173 riposte | 59 damage shield | 323 def. proc — **each stance its own** | 3 movement | **149 overwrite-rider** → slots 6–12 = 254 |
+| `clr_mantle` | 125 heal focus | 132 mana cost | 220 melee dmg | 177 double attack | **149 overwrite-rider** → slots 6–12 = 254 |
+
+SPA 149 slot for every stance in a pool: `base_value` = the pool's slot-1 effect id,
+`formula` = 201 (slot 1), `max_value` = 999999.
+
+**Each stance gets its own proc** (decided) — which also resolves §6's zero-value trap, since no
+stance carries a proc slot at 0.
 
 Skill ids for the 220 limits: **Kick 30 · HandtoHand 28 · FlyingKick 26 · RoundKick 38 ·
 DragonPunch 21 · Bash 10** (`common/skills.h`).
