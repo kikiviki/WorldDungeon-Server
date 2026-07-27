@@ -35,19 +35,20 @@ Status: `open` · `in-progress` · `blocked` · `done`
 | ✅ **Zone connectivity mapped** | Four connection mechanisms identified and dumped. See [ZONE-CONNECTIVITY.md](ZONE-CONNECTIVITY.md). |
 | ✅ **Tooling** | [`tools/dump-zone-graph.sh`](tools/dump-zone-graph.sh) and [`tools/zone-map-graph.py`](tools/zone-map-graph.py), documented in [tools/README.md](tools/README.md). |
 | ✅ **F1 ID range policy** | **Decided.** See [F1-ID-RANGES.md](F1-ID-RANGES.md). Custom bases fixed, `npc_types` convention kept, `zoneidnumber` ceiling myth busted, qglobal naming and W1's restriction id allocated. |
+| ✅ **F2 migrations** | [`worlddungeon/`](../../worlddungeon/README.md) — `wd-migrate`, sha256-tracked, immutable once applied. Custom data is now version-controlled and replayable. |
+| ✅ **F3 backup / restore** | `wd-backup`, and a **restore actually proven** (234 tables, identical counts). Found `make mysql-backup` broken and no automated backups running at all. |
+| ✅ **F4 build loop** | Edit → ninja → restart → zone boots, proved once and reverted. Commands in *Environment notes* below. |
+| ✅ **Stage 2 spikes** | S1/S2/S3 answered — see [STAGE-2-SPIKES.md](STAGE-2-SPIKES.md). **W6 closed**, W5/W7/W10 shrank, W11 grew, one vault assumption corrected. |
+| ✅ **A1 qglobal schema** | [A1-QGLOBAL-SCHEMA.md](A1-QGLOBAL-SCHEMA.md) + migration `0002`. The `options = 5` scoping rule is the load-bearing detail. |
+| 🔧 **First engine code** | **Not yet written.** Stage 1 will be the first. |
 
-**Current fork: `feature/foundations`** — scope is F1, F4, F2, F3 plus the three Stage 2 spikes
-(S1/S2/S3). No engine source touched on this branch; the spikes are read-only source analysis
-whose only job is to shrink the Stage 3/6/7 bill before anyone writes C++.
+**`feature/foundations` is merged and done** (PR #1). Delivered: **F1 ✅ · F2 ✅ · F3 ✅ · F4 ✅ ·
+S1 ✅ · S2 ✅ · S3 ✅ · A1 ✅.**
 
-Progress: **F1 ✅ · F2 ✅ · F3 ✅ · F4 ✅ · S1 ✅ · S2 ✅ · S3 ✅ · A1 ✅ (bonus) — fork scope complete.**
+**Stage 0 and Stage 2 are both closed.** Nothing on the board is gated on foundations any more.
+See *Next session* below for what to pick up.
 
-**Stage 0 is closed and Stage 2 is closed.** Nothing on the board is gated on foundations any
-more. The next move is the parallel split: **Stage 1 (W1+W2+W3)** as one engine branch, and
-**A1 → A2** on the script side. **P1 (Cleric + Monk)** is also unblocked now that F2/F3 exist,
-and it's the item that proves F1 and F2 were right.
-
-Two things this fork produced that change other items:
+Two things that fork produced which change other items:
 
 - **The spikes paid for themselves.** **W6 is closed entirely**, W5 → XS, W7 → S, W10 → XS, W11
   → M+. One vault assumption (V20, SPA 270 as aura range) was simply wrong and is now corrected
@@ -58,15 +59,98 @@ Two things this fork produced that change other items:
 ⏳ **One decision is outstanding and belongs to the owner, not the code:** when backups run, and
 whether they leave this box. See F3.
 
+---
+
+## Next session
+
+Foundations are done, so the board splits into two tracks that should run **in parallel**. The
+design's own warning applies: *the common failure mode is sinking months into Track B and having
+nothing playable.* If only one thing gets done, make it P1.
+
+### 1. P1 — Cleric + Monk · **M** · Track A · ⭐ *do this one*
+
+The MVP critical path, and **the first content that proves F1 and F2 were actually right**.
+Neither class needs any custom C++. Between them they exercise nearly every data mechanism the
+other 14 classes need — the Cleric the spell/heal/AA pipeline, the Monk stances, spellgroups and
+disciplines. If the ID ranges or the migration mechanism are wrong, find out on two classes
+rather than sixteen.
+
+Shape of the work, all inside `worlddungeon/migrations/`:
+
+1. `wd-migrate new cleric_spells` — claim spell block **100,000–100,999** in
+   [F1-ID-RANGES.md](F1-ID-RANGES.md) in the same commit.
+2. Same for the Monk at **101,000–101,999**, plus its two stance spellgroups
+   (`monk_offense` / `monk_defense`) from the 500,000 spellgroup base.
+3. Apply, restart, verify in-game.
+
+Watch for: stances rely on native same-`spellgroup`/same-rank overwrite, and tier lines on ranks
+1–10 — both are data-only per the table at the end of this file. Don't write C++ for either.
+
+### 2. Stage 1 — W1 + W2 + W3 · **S each** · Track B
+
+One branch, one build, one test pass. Mutually independent and they unblock more than anything
+else on the board. **W1 alone unblocks 8 classes** and its `SpellRestriction` id (`1000`) is
+already allocated. F4 proved the build loop, so this is now a ~4 minute rebuild per iteration.
+
+### 3. A2 — Paragon AA → qglobal · **M** · Track A
+
+Unblocked by A1. The front half of the delivery spine. **Every write must use `options = 5`**
+and duration `"F"` — see [A1-QGLOBAL-SCHEMA.md](A1-QGLOBAL-SCHEMA.md), which is emphatic about
+why the default of `0` is a trap.
+
+### Cheap fillers
+
+**A4** (token item + drops, **S**, needs only F1) and **W12** (rebirth unlock, **S**, needs only
+A1) are both one-sitting items if there's an hour spare.
+
+### Suggested branches
+
+- `feature/p1-cleric-monk` — data only, no engine source
+- `feature/stage-1-engine` — W1 + W2 + W3 together
+
+They touch disjoint files and can be worked in either order or at once.
+
+---
+
 ### Environment notes for a fresh session
 
 - Server is up: 1 `world`, 1 `ucs`, 25 `zone`, on the correct `v16-dev` image.
 - **Docker from a non-interactive shell needs `sg docker -c "..."`** — the `docker` group isn't
-  active until a fresh login (akk-stack README §6). Both tools handle this automatically.
+  active until a fresh login (akk-stack README §6). All tools handle this automatically.
 - Git pushes work from the host without entering the container by pointing at the deploy key:
   `GIT_SSH_COMMAND="ssh -i /opt/eqemu-servers/akk-stack/assets/ssh/id_ed25519 -o IdentitiesOnly=yes"`
-- Branch `custom`, in sync with `origin/custom`. All work so far is docs and tools — **zero
-  changes to engine source**, so `git diff upstream/master -- zone/ common/` is still empty.
+- **Branch `custom` is the working branch, and `origin/custom` and `origin/master` are currently
+  identical** — foundations was merged into `master` via PR #1, then `custom` was
+  fast-forwarded to match. Branch from `custom`.
+- Still **zero changes to engine source**, so `git diff upstream/master -- zone/ common/` is
+  still empty. Stage 1 will be the first thing to change that.
+
+#### Build / run loop (proved in F4)
+
+```bash
+sg docker -c "docker compose exec -T eqemu-server bash -lc 'cd ~/code/build && ninja -j\$(expr \$(nproc) - 2)'"
+```
+
+```bash
+sg docker -c "docker compose exec -T eqemu-server bash -lc 'cd ~/server && ./bin/spire spire:launcher restart'"
+```
+
+`~/code` is a bind mount of this repo and `~/server/bin/{zone,world}` are symlinks into
+`~/code/build/bin/`, so a successful build is live at the next restart — no install step. Full
+restart is ~45s for all 25 zones. Verify against a **zone** log, not world.
+
+#### Database
+
+```bash
+./worlddungeon/bin/wd-migrate status && ./worlddungeon/bin/wd-migrate up
+```
+
+```bash
+./worlddungeon/bin/wd-backup dump
+```
+
+**Take a dump before any session that writes migrations.** `make mysql-backup` is broken — use
+`wd-backup` (see F3). Applied migrations are immutable; to change one, write a new one.
 
 ### Corrections to the design vault
 
