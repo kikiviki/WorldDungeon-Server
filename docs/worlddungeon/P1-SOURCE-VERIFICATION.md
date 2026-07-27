@@ -108,14 +108,79 @@ term is W11's problem, not P1's. **Author Badger's other components and don't le
 
 ---
 
+---
+
+## 6. What "matching layout" means exactly — and one trap it creates
+
+**DECIDED: matching layout** (see the vault's *Open Decisions* D-2026-07-27). Reading the
+mechanism precisely, `zone/spells.cpp:3150`:
+
+```cpp
+for (i = 0; i < EFFECT_COUNT; i++) {
+    if (sp1.effect_id[i] != sp2.effect_id[i] || sp1.effect_id[i] == SpellEffect::ManaBurn) {
+        effect_match = false;
+        break;
+    }
+}
+// if (!effect_match) -> per-slot conflict resolution, partial stacking, blockers
+```
+
+**The bar is: all 12 `effectid` slots identical.** Not "overlapping", not "the ones that matter" —
+identical across the whole array, unused slots included (`Blank` = **254**,
+`common/spdat.h:1317`). If every slot matches, the engine treats the two spells as *the same
+line* and overwrites cleanly. One slot different and you fall into per-slot resolution, which is
+where partial coexistence comes from.
+
+### 🔴 The trap: not every SPA is safe at base value 0
+
+Since all four stances in a pool must carry all four effects, the three that don't use a given
+effect carry it at **value 0**. That is fine for most SPAs but **not for SPA 85 `WeaponProc`**:
+
+```cpp
+case SpellEffect::WeaponProc:
+    newbon->SpellProc[i + COMBAT_PROC_SPELL_ID] = base_value;  // zone/bonuses.cpp:1048
+```
+
+A zero there registers **proc spell id 0** and **consumes one of `MAX_AA_PROCS` slots**. It won't
+fire (`IsValidSpell(0)` is false) but it burns a limited resource and hides real procs.
+
+**Consequence for the Monk offense pool:** Dragon's melee proc **cannot** sit in a shared layout
+alongside three stances that don't proc.
+
+**Recommended resolution — give every offense stance a real proc.** It's the option that keeps
+the layout legal *and* improves the design: Ostrich/Gorilla/Hummingbird each get a thematic
+low-magnitude proc instead of a dead slot. Dragon stays the proc-focused one via magnitude and
+rate, not by being the only one with the effect.
+
+**Rule for authoring any pool: only put an SPA in a shared layout if value 0 is a true no-op.**
+Verified safe at 0: **220** (skill damage), **119** (attack speed), **3** (movement), **173**
+(riposte), **59** (damage shield). Verified unsafe at 0: **85** / **323** (proc registration —
+both write a spell id into a bounded proc array).
+
+### Draft pool layouts
+
+| Pool | Slot 1 | Slot 2 | Slot 3 | Slot 4 | 5–12 |
+|---|---|---|---|---|---|
+| `monk_offense` | 220 skill dmg | 119 attack speed | 85 proc *(all four need a real proc)* | 3 movement | 254 |
+| `monk_defense` | 173 riposte | 59 damage shield | 323 def. proc *(same caveat)* | 3 movement | 254 |
+| `clr_mantle` | 125 heal focus | 132 mana cost | 220 melee dmg | 177 double attack | 254 |
+
+Skill ids for the 220 limits: **Kick 30 · HandtoHand 28 · FlyingKick 26 · RoundKick 38 ·
+DragonPunch 21 · Bash 10** (`common/skills.h`).
+
+`clr_mantle` is safe at 0 in every slot — no proc SPA — so the Cleric's mantles need no
+restructuring. **Author the Cleric first.**
+
+---
+
 ## Outstanding
 
 | Item | Class | Status |
 |---|---|---|
-| Flurry SPA number, tunable independently of haste | Monk (Hummingbird) | not yet checked |
+| ~~Flurry SPA~~ | Monk (Hummingbird) | ✅ **279** `Flurry`, separate from 119 `AttackSpeed3` — **independently tunable** |
 | Does same-layout overwrite trigger a recast/GCD? | Monk | **now more important** — decides how fluid swapping feels, given finding #1 |
 | Recourse behaviour on partial resist | Cleric (smite) | not yet checked |
-| SPA 125 accepts a negative value | Cleric (Zealot's penalty) | not yet checked |
+| ~~SPA 125 accepts a negative value~~ | Cleric (Zealot's penalty) | ✅ **yes** — focus selection explicitly handles negatives (`zone/spell_effects.cpp:6571`). ⚠️ But focus effects select a **single best/worst**, they do not sum — so Zealot's penalty and a heal-focus AA will not simply add. Worth a design pass. |
 | Darkvision SPA | Monk (Badger) | low priority |
 | Weapon types vs. §2.1 | both | design question, not source |
 
