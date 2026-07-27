@@ -31,8 +31,8 @@
 > 3. **Reuse stock ids** for spells being replaced anyway, since most stock class assignments are
 >    being stripped (see the `baseline-stock-spells-aa` snapshot).
 >
-> **Option 2's "tiers via AA rank" deserves a look first** — it would cut the spell budget by
-> ~10x and sidesteps the cap entirely, though it changes how tiers are delivered.
+> **✅ RESOLVED — see "The Rk. I/II/III model" below. Three tiers makes it fit with room to
+> spare, and no cap change is needed.**
 >
 > See also: `SPELLBOOK_SIZE = 720` and `SPELL_GEM_COUNT` in the same file — the spellbook is
 > also finite, which matters for the ALL/ALL scroll plan.
@@ -54,7 +54,7 @@ spellgroup, in an AA rank effect, in a vendor Lua script, and in a quest global.
 
 | Table / column | Max stock id | Stock rows | **Custom base** | Headroom |
 |---|---:|---:|---:|---:|
-| `spells_new.id` | 42,602 | 40,722 | **100,000** | 57k before stock |
+| `spells_new.id` | 42,602 | 40,722 | **42,700** ⚠️ *(client-capped at 45,000 — see above)* | ~2.3k |
 | `spells_new.spellgroup` | 100,276 | 3,233 groups | **500,000** | 400k |
 | `items.id` | 147,494 | 117,944 | **1,000,000** | 852k |
 | `aa_ability.id` | 30,195 | 1,568 | **100,000** | 70k |
@@ -215,6 +215,71 @@ spellgroup is required; *which* spellgroup is read from the spell's limit/max fi
 **one id, permanently**, with no block to reserve and no ceiling on spellgroup count.
 
 ---
+
+---
+
+## The Rk. I/II/III model — how tiers are delivered
+
+**Copied from stock live data, which is the model to follow.** A real example, `spellgroup 1010`:
+
+| id | name | spellgroup | `rank` | effect layout | base | mana | classes2 |
+|---:|---|---:|---:|---|---:|---:|---:|
+| 9703 | Blessing of Purpose | 1010 | **1** | 127,134,139 | 9 | 390 | 71 |
+| 9704 | Blessing of Purpose **Rk. II** | 1010 | **5** | 127,134,139 | 10 | 390 | 71 |
+| 9705 | Blessing of Purpose **Rk. III** | 1010 | **10** | 127,134,139 | 11 | 390 | 71 |
+
+Five things worth copying exactly:
+
+1. **Live ships three tiers, not ten.** This is the client-native convention.
+2. **`rank` is 1 / 5 / 10**, not 1 / 2 / 3. The gaps are deliberate — the field is a *position*
+   on a 1–10 scale, not a counter. Author 1/5/10.
+3. **Consecutive spell ids**, one per tier. **Tiers are not free** — each is its own id. There is
+   no "direct upgrade" that reuses one id; the Rk. II mechanism *is* three rows.
+4. **Identical effect layout** across all three, ascending base values. This is exactly case 2 of
+   the `0003` taxonomy — higher tier overwrites lower through plain value comparison, **no SPA
+   149 rider needed**.
+5. **Same `classesN` level on all three.** The player scribes whichever they are entitled to, and
+   `GetHighestScribedSpellinSpellGroup` (`zone/spells.cpp:6129`) resolves which one they actually
+   get — which is precisely the hook A3's spell vendor gates on.
+
+### The budget now works
+
+**DECIDED: three tiers (Rk. I / II / III) at ranks 1 / 5 / 10.**
+
+The free band under the 45,000 cap is **42,603–45,000 ≈ 2,398 ids**. At three tiers:
+
+| | |
+|---|---:|
+| 16 classes × ~15 distinct lines × 3 tiers | ~720 |
+| ALL/ALL universal spells | ~150 |
+| AA-granted spell-like abilities | ~200 |
+| Procs, recourses, riders | ~200 |
+| **Total** | **~1,270** |
+
+**That fits in 2,398 with roughly half the band spare** — without raising `SPELL_ID_MAX` and
+without reclaiming a single stock id. Ten tiers would have needed ~2,400 for classes alone and
+blown the budget; three tiers is what makes this work.
+
+**Stock-id reuse stays available as headroom, not as a dependency.** Ids freed by stripping
+unnecessary stock spells can extend the band if the design grows — and the
+`baseline-stock-spells-aa` snapshot means that is reversible. But nothing needs it today.
+
+> ⚠️ **The 5-tier option was considered and is worse than 3**: it costs ~1,200 ids for classes
+> alone, and more importantly it is *not* a shape the client or the stock data has ever used, so
+> it buys nothing the 3-tier model doesn't already give.
+
+### Revised spell ranges
+
+| Purpose | Range |
+|---|---|
+| Per-class spells | **42,700–44,199** |
+| ALL/ALL universal | **44,200–44,499** |
+| AA-granted abilities | **44,500–44,899** |
+| Procs / recourses / riders | **44,900–44,999** |
+| *Reserved buffer* | 42,603–42,699 |
+
+Spellgroups are **not** capped by the client — they are server-side only — so the 500,000+
+spellgroup ranges stand unchanged.
 
 ---
 
