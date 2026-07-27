@@ -1,11 +1,12 @@
 # WorldDungeon tools
 
-Two tools for reading the zone graph out of the live database.
+Three tools for reading the zone graph out of the live database.
 
 | Tool | Answers |
 |---|---|
 | [`zone-map-graph.py`](zone-map-graph.py) | *What is this zone connected to?* — a visual map graph, or a text island report |
 | [`dump-zone-graph.sh`](dump-zone-graph.sh) | *Give me every connection as data* — typed edge list for scripting and diffing |
+| [`dump-zone-topology-csv.sh`](dump-zone-topology-csv.sh) | *One row per zone for a spreadsheet* — the world-planning sheet |
 
 Both read the database live. Nothing is cached; re-run to pick up changes.
 
@@ -175,6 +176,40 @@ output directory outside the repo; with no argument it writes to `./zone-graph`.
 
 Main use is the Pillar 1 audit: diff a proposed adjacency list against `edges.tsv`, and
 anything in both is an accidental live-EQ match to rewire.
+
+---
+
+## `dump-zone-topology-csv.sh`
+
+One row per zone, for planning the world map in a spreadsheet.
+
+```bash
+docs/worlddungeon/tools/dump-zone-topology-csv.sh ~/zone-topology.csv
+```
+
+| Column | Meaning |
+|---|---|
+| `zone_name` | `zone.long_name` |
+| `short_name` | the real constraint on a custom zone — the client loads geometry by name |
+| `zone_id` | `zone.zoneidnumber` |
+| `connections` | distinct neighbouring zones, either direction |
+| `two_way` / `out_only` / `in_only` | the directional breakdown |
+| `connected_zones` | every neighbour, sorted, each tagged `(both)` / `(out)` / `(in)` |
+
+**Standard travel only** — zonelines, clicky portals (`opentype` 57–58) and destination doors.
+Quest-script ports and travel *spells* are excluded on purpose: neither is fixed world
+geometry, so neither belongs in a map you are planning against. Broken numeric-`dest_zone`
+doors are excluded too, because they never fire.
+
+All 482 zones are listed, **including the 94 with no connections at all** — an unconnected
+stock zone is a candidate to repurpose, so it belongs in the planning sheet.
+
+**Direction is a first-class column because 25% of stock edges are one-way.** 138 zones have at
+least one outbound-only neighbour. A zone with `connections = 3` and `in_only = 3` is a roach
+motel; `connections` alone will not tell you that.
+
+Output is **not** committed, same as the edge dump — regenerable, and it churns on every PEQ
+update. Current working copy lives in the vault at `01 World & Zones/zone-topology.csv`.
 
 ---
 

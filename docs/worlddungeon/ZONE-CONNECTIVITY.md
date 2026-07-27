@@ -228,3 +228,21 @@ Database coordinates are negated on the way in, so DB overlays line up with map 
 
 Deliberately **not** committed — it's regenerable, ~1,500 rows, and would churn on every PEQ
 update. Regenerate on demand.
+
+## Per-zone planning sheet: `dump-zone-topology-csv.sh`
+
+The same graph folded to **one row per zone**, for planning the world map in a spreadsheet:
+name, short name, zone id, connection count, a `two_way` / `out_only` / `in_only` breakdown,
+and the full neighbour list with each entry tagged by direction.
+
+```bash
+docs/worlddungeon/tools/dump-zone-topology-csv.sh ~/zone-topology.csv
+```
+
+Counts **standard travel only** — zonelines, clicky portals and destination doors. Quest-script
+ports and travel spells are excluded, because neither is fixed world geometry. All 482 zones
+appear, including the 94 isolated ones, since an unconnected stock zone is a candidate to
+repurpose. Aggregates agree with this document's independently-derived figures.
+
+Working copy lives in the vault at `01 World & Zones/zone-topology.csv`; like the edge dump it
+is not committed.
