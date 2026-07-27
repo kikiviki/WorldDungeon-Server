@@ -190,6 +190,11 @@ content. They're skipped and named on stderr, not silently dropped.
 isolated than it is*, which is exactly the wrong impression when hunting islands. If you see
 it while investigating connectivity, re-run with `--limit 0`.
 
+**Panning feels heavy on big graphs.** Transforms are throttled to one per animation frame
+and detail rendering is dropped while dragging, but a 400-zone graph is still tens of
+thousands of SVG paths. If it drags badly, cut `--max-segments` (400 is plenty) or scope the
+view with `--from X --depth 2` rather than rendering everything.
+
 **Dark map colours.** Brewall uses deep blues and greens that vanish at thumbnail size, so
 line colours are scaled up to a brightness floor - hue preserved, brightness lifted.
 

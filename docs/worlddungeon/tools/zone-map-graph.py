@@ -466,20 +466,35 @@ def exit_point(px, py, cx, cy, w, h, tx, ty):
     Where the segment from an interior point (px,py) toward (tx,ty) leaves the
     node box centred at (cx,cy). Used to split an edge into the part outside the
     node and the part inside it, so the inside part can be drawn back on top.
+
+    Only intersections that actually lie ON the rectangle and within the segment
+    are accepted. Taking the nearest positive slab crossing is not enough: for a
+    point already on the boundary the true crossing is at t=0, which rounds away,
+    and the next candidate can be far outside the box - which is what made edges
+    appear to start in empty space.
     """
     dx, dy = tx - px, ty - py
     if dx == 0 and dy == 0:
         return px, py
     x0, x1 = cx - w / 2, cx + w / 2
     y0, y1 = cy - h / 2, cy + h / 2
+    eps = 1e-6
     ts = []
     if dx:
         ts += [(x0 - px) / dx, (x1 - px) / dx]
     if dy:
         ts += [(y0 - py) / dy, (y1 - py) / dy]
-    ts = [t for t in ts if t > 1e-9]
-    t = min(ts) if ts else 0.0
-    return px + dx * t, py + dy * t
+
+    best = None
+    for t in ts:
+        if t <= eps or t > 1.0:
+            continue
+        cxx, cyy = px + dx * t, py + dy * t
+        if x0 - 1e-3 <= cxx <= x1 + 1e-3 and y0 - 1e-3 <= cyy <= y1 + 1e-3:
+            best = t if best is None else min(best, t)
+    if best is None:
+        return px, py          # already on/outside the boundary
+    return px + dx * best, py + dy * best
 
 
 def clip_to_box(cx, cy, w, h, tx, ty):
@@ -559,7 +574,7 @@ def render(zone_ids, zones, edges, geom, pos, anchors, args):
         # stays legible where it crosses an unrelated node
         seg = (f'M{ea[0] - minx:.1f},{ea[1] - miny:.1f}'
                f'L{eb[0] - minx:.1f},{eb[1] - miny:.1f}')
-        add(f'<path d="{seg}" stroke="#0b0e13" stroke-width="4.5" stroke-opacity=".55"/>')
+        add(f'<path d="{seg}" stroke="#1b1f27" stroke-width="4.5" stroke-opacity=".55"/>')
         add(f'<path d="{seg}" stroke="{colour}" stroke-width="1.8" '
             f'stroke-opacity="{op}"{dashattr}><title>{tip}</title></path>')
 
@@ -571,13 +586,13 @@ def render(zone_ids, zones, edges, geom, pos, anchors, args):
                 continue
             d = (f'M{bx_ - minx:.1f},{by_ - miny:.1f}L{ax_ - minx:.1f},{ay_ - miny:.1f}')
             mk = f' marker-end="url(#arw-{t})"' if arrow else ""
-            over.append(f'<path d="{d}" stroke="#0b0e13" stroke-width="4.5" '
+            over.append(f'<path d="{d}" stroke="#1b1f27" stroke-width="4.5" '
                         f'stroke-opacity=".7" fill="none"/>')
             over.append(f'<path d="{d}" stroke="{colour}" stroke-width="1.8" '
                         f'stroke-opacity=".95" fill="none"{dashattr}{mk}>'
                         f'<title>{tip}</title></path>')
             over.append(f'<circle cx="{ax_ - minx:.1f}" cy="{ay_ - miny:.1f}" r="3" '
-                        f'fill="{colour}" stroke="#0b0e13" stroke-width="1"/>')
+                        f'fill="{colour}" stroke="#1b1f27" stroke-width="1"/>')
     add("</g>")
 
     # --- nodes ------------------------------------------------------------
@@ -641,17 +656,19 @@ def render(zone_ids, zones, edges, geom, pos, anchors, args):
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <title>WorldDungeon zone graph</title><style>
 :root{{color-scheme:dark}}
-body{{margin:0;background:#0e1116;color:#dfe6ef;
+body{{margin:0;background:#272c35;color:#e6ecf5;
      font:13px/1.4 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}}
-#bar{{position:fixed;top:0;left:0;right:0;padding:8px 12px;background:#151a22ee;
-     border-bottom:1px solid #263041;display:flex;gap:20px;align-items:center;z-index:9}}
+#bar{{position:fixed;top:0;left:0;right:0;padding:8px 12px;background:#1b1f27ee;
+     border-bottom:1px solid #3d4757;display:flex;gap:20px;align-items:center;z-index:9}}
 #bar b{{color:#fff}} #legend{{display:flex;gap:16px}}
-#legend div{{display:flex;align-items:center;gap:6px;color:#9fb0c6}}
+#legend div{{display:flex;align-items:center;gap:6px;color:#b6c5da}}
 .sw{{display:inline-block;width:26px;border-top:2.5px solid}}
-#hint{{margin-left:auto;color:#66748a}}
+#hint{{margin-left:auto;color:#8b9ab0}}
 svg{{display:block;width:100vw;height:100vh}}
-.zbox{{fill:#131a26;stroke:#4a5d78;stroke-width:1.2}}
-.zhdr{{fill:#31415a}}
+#root{{will-change:transform}}
+svg.panning path{{shape-rendering:optimizeSpeed}}
+.zbox{{fill:#12161e;stroke:#5b6d88;stroke-width:1.2}}
+.zhdr{{fill:#3a4a64}}
 .zttl{{fill:#f2f7ff;font:600 12px ui-monospace,monospace}}
 .zid{{fill:#a8bcd6;font-weight:400}}
 .zone:hover .zbox{{stroke:#7ecbff;stroke-width:2.5}}
@@ -673,11 +690,15 @@ svg.addEventListener('wheel',e=>{{e.preventDefault();
   const mx=(e.clientX-r.left)*sc,my=(e.clientY-r.top)*sc;
   const f=e.deltaY<0?1.12:1/1.12,nk=Math.min(30,Math.max(.03,k*f));
   tx=mx-(mx-tx)*(nk/k); ty=my-(my-ty)*(nk/k); k=nk; apply();}},{{passive:false}});
-svg.addEventListener('mousedown',e=>{{drag=true;px=e.clientX;py=e.clientY;}});
-addEventListener('mouseup',()=>drag=false);
+let queued=false;
+const schedule=()=>{{if(queued)return;queued=true;
+  requestAnimationFrame(()=>{{queued=false;apply();}});}};
+svg.addEventListener('mousedown',e=>{{drag=true;px=e.clientX;py=e.clientY;
+  svg.classList.add('panning');e.preventDefault();}});
+addEventListener('mouseup',()=>{{drag=false;svg.classList.remove('panning');apply();}});
 addEventListener('mousemove',e=>{{if(!drag)return;
   const r=svg.getBoundingClientRect(),vb=svg.viewBox.baseVal,sc=vb.width/r.width;
-  tx+=(e.clientX-px)*sc; ty+=(e.clientY-py)*sc; px=e.clientX; py=e.clientY; apply();}});
+  tx+=(e.clientX-px)*sc; ty+=(e.clientY-py)*sc; px=e.clientX; py=e.clientY; schedule();}});
 </script></body></html>"""
 
 
