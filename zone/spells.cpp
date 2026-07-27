@@ -3149,10 +3149,20 @@ int Mob::CheckStackConflict(uint16 spellid1, int caster_level1, uint16 spellid2,
 
 		Same-id casts are already handled above and never reach here, so a refresh keeps
 		its normal level-comparison behaviour.
+
+		BENEFICIAL ONLY, and that restriction is load-bearing. spell_group carries two
+		unrelated WorldDungeon meanings: an exclusivity pool here, and a combo-flag family
+		for W1's IS_TARGET_HAS_WD_SPELLGROUP. Combo families deliberately put several
+		spells in one group - the Necromancer's single-target and AE flavour DoTs share a
+		group precisely so Reap's Limit matches either - and those must go on stacking
+		normally. Every stance pool is a beneficial self-buff and every combo flag is
+		detrimental, so this one test separates the two meanings with no new field.
+		It also keeps the check clear of stock's multi-caster DoT handling below.
 	*/
 	if (spellid1 != spellid2 &&
 	    sp1.spell_group >= WD_EXCLUSIVE_SPELLGROUP_BASE &&
-	    sp1.spell_group == sp2.spell_group) {
+	    sp1.spell_group == sp2.spell_group &&
+	    IsBeneficialSpell(spellid1) && IsBeneficialSpell(spellid2)) {
 		LogSpells("[{}] ([{}]) and [{}] ([{}]) share WorldDungeon exclusivity group [{}], overwriting",
 			sp1.name, spellid1, sp2.name, spellid2, sp2.spell_group);
 		return 1;

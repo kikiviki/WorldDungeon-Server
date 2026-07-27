@@ -208,21 +208,49 @@ Limits name them, so the AE and single-target versions of a flavour must share a
 
 ## 5. Build order
 
-Per vault §14h:
+> [!warning] **Corrected while authoring migration `0009`.** Step 1 below said spells 1–10 need
+> "no code beyond W1". **That is wrong for 4, 5, 9 and 10.** W1 as built tests *one* spellgroup
+> and returns a boolean — see `Mob::PassCastRestriction`. The synergy DoTs need "target has 2 of
+> these 3 groups" and Reap needs a flavour **count** plus strip-on-detonate, which no stock SPA
+> provides. `DETONATION-PATTERN.md` §4 already flagged both ("AND of two flags", "strip-on-
+> detonate… decide before the Necro's Reap copies it — Reap *requires* consumption").
+> **The class's marquee ability is engine-blocked, not data-only.**
 
-1. **Flavour DoTs + synergy DoTs + Reap (1–10)** — **start immediately.** This is the class's
-   whole damage identity and needs no code beyond W1.
-2. **Beefy Boy (18), nukes, utility (26–30)** — stock, immediate.
-3. **W5 life ward (11–12)** with the Paladin/SK accumulator package. Read SPA 150 first.
-4. **W7 swarm AI** with the Enchanter and Ranger.
-5. **Curse-raise trigger (19–20)** last — it depends on W7.
+Revised:
+
+1. ✅ **Flavour DoTs 1–3 and 6–8** — done, migration `0009`. The combo *flags* are data-only even
+   though the combo is not, so the class has a working damage rotation today.
+2. ✅ **Beefy Boy (18), Exsanguinate (15), Deny the Reaper (13), Grave Bulwark (22),
+   HP-as-resource (23–25), nukes and utility (26–30)** — done, migration `0009`.
+3. 🔴 **W1 extension, then synergy DoTs + Reap (4, 5, 9, 10)** — the marquee. Needs a
+   multi-group predicate and a consumption mechanism. **This is now the class's critical path**,
+   and it is shared with the Wizard's deferred Thermal Shock and Cascade.
+4. **W5 life ward (11–12)** with the Paladin/SK accumulator package. SPA 150 is already read —
+   see `0009`'s Deny the Reaper notes, including the charisma problem.
+5. **W2 leech split (14, 16, 17)** — 15 already ships because it has no group share.
+6. **W7 swarm AI**, then the **curse-raise trigger (19–20)** last.
 
 ---
 
 ## 6. Open items
 
-- [ ] **SPA 340/374 trigger semantics, and whether Limit SPAs can test for a spellgroup on the
-      *target*.** This gates the whole combo system — **check first.**
+- [x] ~~Whether Limit SPAs can test for a spellgroup on the *target*~~ — **yes, via W1**
+      (`IS_TARGET_HAS_WD_SPELLGROUP`), built. But **one group per 442 slot**, boolean, which is
+      what blocks 4/5/9/10. See §5.
+- [ ] **W1 multi-group predicate** — "target carries ≥ K of groups G₁…Gₙ". Gates 4, 5, 9, 10.
+      A data-only alternative exists and should be weighed first: **chained riders**, where a
+      rider's 442 payload is *another rider* testing the next group, giving an AND with no engine
+      change. Cost is latency — each link resolves on a later damage/cast event, so Trinity could
+      take 2–3 ticks to pay off, which may or may not read as sluggish.
+- [ ] **Strip-on-detonate for Reap.** Reap must consume the flavour DoTs; no stock SPA removes a
+      buff by spellgroup. Shared with the Wizard's lure strip.
+- [ ] **SPA 150 fire chance is charisma-driven** — `(CHA * 3 + 1) / 10`, capped 95
+      (`zone/spell_effects.cpp:7204`). CHA is a Necromancer dump stat, so Deny the Reaper fires
+      ~20–25% of the time. Rule override, CHA-independent variant, or accept.
+- [ ] **No stock "cannot cast below X% HP" guard** for the §9e HP-cost spells. The safety floor
+      the design assumes does not exist in data.
+- [ ] **Does a duration lifetap return HP per tick or only on application?** 14/16/17 are designed
+      against the per-tick assumption. In `0009`'s test matrix.
 - [ ] **SPA 152 standing-cap behaviour** across multiple casts.
 - [ ] Whether a **"killed while debuffed by caster X"** hook exists on the NPC death path —
       shared with the Wizard.

@@ -690,9 +690,31 @@ in data on top of W1. **The P3.1 reference template is written up in
 not the migrations. Remaining Wizard scope: Thermal Shock + Cascade (W1 extension), mana ward
 (W4 pkg), black hole, Careful Caster, ports, and the Sculpt→AE-lure gate.
 
-### P3 — Necromancer, Rogue, Druid, Berserker, Beastlord, Enchanter · **M each** · open
+### P3 — Necromancer, Rogue, Druid, Berserker, Beastlord, Enchanter · **M each**
 
 Apply the P3.1 pattern. *(Their swarm halves are Stage 6.)*
+
+#### Necromancer · 🚧 **core authored, marquee blocked**
+
+**Migration [`0009_necromancer_core.sql`](../../worlddungeon/migrations/0009_necromancer_core.sql)
+— 18 of 30 spells × Mk. I/II/III = 54 rows, SQL-validated by rollback, unapplied behind the
+`0004` gate.** Flavour DoTs (single-target and AE), Deny the Reaper, Exsanguinate, Summon
+Bonelord, Grave Bulwark, the HP-as-resource line, nukes and utility. He has a working damage
+rotation today.
+
+🔴 **His marquee is engine-blocked, and the class doc said otherwise.** Its build order claimed
+spells 1–10 need "no code beyond W1"; that is wrong for **4, 5, 9, 10**. W1 tests **one**
+spellgroup and returns a boolean, while Synergy needs "2 of these 3 groups" and Reap needs a
+flavour **count** plus **strip-on-detonate**. `DETONATION-PATTERN.md` §4 had already flagged both
+— the doc's build order simply had not absorbed it. Corrected in
+[necromancer.md](spells/necromancer.md) §5.
+
+**Before building a W1 extension, weigh the data-only alternative: chained riders** — a rider
+whose 442 payload is another rider testing the next group, giving an AND with no engine change.
+Cost is latency; each link resolves on a later damage/cast event. Shared decision with the
+Wizard's deferred Thermal Shock and Cascade.
+
+Also deferred: 11–12 (W5), 14/16/17 (W2), 19–21 (W7).
 
 ### P4 — Paladin ward · **M** · open · *also depends: W4*
 

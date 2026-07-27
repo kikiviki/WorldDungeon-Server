@@ -607,6 +607,12 @@ enum SpellRestriction
 // stance pool a pool — disables every one of them. See
 // docs/worlddungeon/P1-STACKING-DEFECT.md.
 //
+// Applies to BENEFICIAL spells only. spell_group carries two unrelated custom
+// meanings — an exclusivity pool here, and a combo-flag family for W1's
+// IS_TARGET_HAS_WD_SPELLGROUP, where several spells share a group on purpose.
+// Stances are beneficial and combo flags are detrimental, so that one test
+// keeps the two meanings apart. See P1-STACKING-DEFECT.md.
+//
 // Gated to the custom band so stock spell behaviour is untouched: PEQ's highest
 // spell_group is well below this, and F1 allocates WorldDungeon spellgroups
 // from 500,000 (docs/worlddungeon/F1-ID-RANGES.md).

@@ -126,6 +126,14 @@ Why this shape:
 
 - **No new column, no new SPA.** F1 already allocates WorldDungeon spellgroups from 500,000 and
   the nine mantles already share `500001`. The pool concept was already in the data.
+- **Beneficial spells only** — added while authoring the Necromancer, and load-bearing.
+  `spell_group` now carries **two unrelated meanings**: an exclusivity pool here, and a
+  **combo-flag family** for W1's `IS_TARGET_HAS_WD_SPELLGROUP`. Combo families deliberately hold
+  several spells — the Necro's single-target and AE flavour DoTs share a group precisely so
+  Reap's Limit matches either — and those must keep stacking normally. Every stance pool is a
+  beneficial self-buff and every combo flag is detrimental, so one test separates them with no
+  new field. It also keeps the check clear of stock's multi-caster DoT handling. **Do not widen
+  this without auditing every custom spellgroup.**
 - **Stock behaviour is untouched.** PEQ's highest `spell_group` is **100,276** and **zero** stock
   rows sit at or above 500,000 (checked on the live DB), so the branch cannot fire on stock content.
 - **The Monk's two pools are just two spellgroups.** No per-class code, and the mechanism serves
