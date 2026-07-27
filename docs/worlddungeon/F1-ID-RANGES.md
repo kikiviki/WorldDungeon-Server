@@ -1,5 +1,44 @@
 # F1 — Custom ID Range Allocation Policy
 
+> [!danger] 🔴 **BLOCKER — the spell range below is WRONG and must change. Found 2026-07-27.**
+> **The ROF2 client caps spell ids at 45,000.** `common/patches/rof2_limits.h:346` —
+> `SPELL_ID_MAX = 45000` — and it is enforced when the spellbook is serialised
+> (`common/patches/rof2.cpp:2720`):
+> ```cpp
+> if (emu->spell_book[r] <= spells::SPELL_ID_MAX)
+>     outapp->WriteUInt32(emu->spell_book[r]);
+> else
+>     outapp->WriteUInt32(0xFFFFFFFFU);   // <-- written as an EMPTY SLOT
+> ```
+> Any scribed spell above 45,000 is sent to the client as an empty spellbook slot. It is
+> invisible and uncastable. **The 100,000 spell base is unusable as written**, and that
+> invalidates the Cleric block, the ALL/ALL range, the AA-granted range, and the rows already
+> written by migration `0003`.
+>
+> **Nothing is lost** — `0003` is 12 rows and no player has ever seen them — but **do not author
+> further spells until the range is re-decided.** Items, AA, doors, zone_points and npc_types
+> ranges are all unaffected; this is a spells-only problem.
+>
+> **The hard part is that the free band is small.** Stock max is 42,602, so ids
+> **42,603–45,000 = ~2,398 slots** are all that fit under the cap. A design of 16 classes with
+> ~40 abilities at 10 tiers each wants far more than that. Three ways out, none yet chosen:
+> 1. **Raise `SPELL_ID_MAX`** — one constant, but the *client's* own capacity is the real limit
+>    and this needs empirical testing, not a source read. ⚠️ Also note the client loads spell
+>    text from its local `spells_us.txt`, so custom spells need a client-side file shipped to
+>    players regardless.
+> 2. **Spend the 2,398 slots deliberately** — fewer tiers, or tiers via AA rank scaling on one
+>    spell id rather than ten ids.
+> 3. **Reuse stock ids** for spells being replaced anyway, since most stock class assignments are
+>    being stripped (see the `baseline-stock-spells-aa` snapshot).
+>
+> **Option 2's "tiers via AA rank" deserves a look first** — it would cut the spell budget by
+> ~10x and sidesteps the cap entirely, though it changes how tiers are delivered.
+>
+> See also: `SPELLBOOK_SIZE = 720` and `SPELL_GEM_COUNT` in the same file — the spellbook is
+> also finite, which matters for the ALL/ALL scroll plan.
+
+
+
 **Status:** decided · branch `feature/foundations`
 
 Every custom record WorldDungeon authors gets an id from the ranges below. The point is that
