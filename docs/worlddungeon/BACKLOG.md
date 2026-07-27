@@ -56,8 +56,8 @@ Two things that fork produced which change other items:
 - **The backup story was broken in two independent ways** and neither had ever been noticed,
   because nothing had ever been restored. See F3.
 
-⏳ **One decision is outstanding and belongs to the owner, not the code:** when backups run, and
-whether they leave this box. See F3.
+**Backups are now scheduled** — nightly at 04:00 to a Dropbox-synced folder, retaining 14 days.
+See F3. Nothing on the board is waiting on a decision.
 
 ---
 
@@ -263,7 +263,7 @@ applied.
 First migration `0001_id_range_registry` puts F1's policy in the DB as `wd_id_range`, plus
 `wd_npc_band` for the per-zone NPC sub-band claims F1 requires.
 
-### F3 — Backup and restore discipline · **S** · ✅ **done (one decision outstanding)** · *depends: F2*
+### F3 — Backup and restore discipline · **S** · ✅ **done** · *depends: F2*
 
 **Restore is proven.** Dump → restore into a scratch database → compare → drop:
 
@@ -313,17 +313,41 @@ written inside the container and the ownership bug cannot recur.
 truncated dump is worse than no dump, because it looks like a backup. Measured: 31 MB gzipped,
 ~2 min.
 
-#### ⏳ Outstanding — needs a decision, not code
+#### ✅ Scheduled — installed and running
 
-**When does it run?** Nothing is scheduled yet. The intended line, once approved:
+**Daily at 04:00, retaining 14 days**, via `worlddungeon/bin/wd-backup-nightly` in the `eqdev`
+crontab:
 
 ```
-0 4 * * *  cd /opt/eqemu-servers/akk-stack/code && ./worlddungeon/bin/wd-backup dump && ./worlddungeon/bin/wd-backup prune 14
+0 4 * * * /opt/eqemu-servers/akk-stack/code/worlddungeon/bin/wd-backup-nightly
 ```
 
-**Not installed** — a host crontab is persistent config and is the user's call. Also worth
-deciding: whether backups should leave this box at all (the Dropbox path exists but is
-unconfigured), because a backup on the same disk as the database is not a backup.
+**Destination `/home/eqdev/Dropbox/eqemu/eq-serv-backup/` — a Dropbox-synced folder, so backups
+leave the box.** A backup on the same disk as the database is not a backup.
+
+Backs up the two things that can't be rebuilt from git:
+
+- the `peq` database (player state, plus any custom rows)
+- server config — `eqemu_config.json` and `login.json`, tarred **`0600` because they contain
+  credentials**
+
+Everything else is version-controlled: the engine, and every custom row's defining SQL under
+`worlddungeon/migrations/`.
+
+Behaviour worth knowing:
+
+- Logs to `wd-backup.log` in the same folder, self-truncating at 1 MB.
+- **Prune never runs below one surviving dump**, so a run of failures can't leave you with
+  nothing.
+- `wd-backup dump` validates its own output, so a failure means *no new dump* rather than a
+  corrupt one.
+- Exits non-zero if either half failed, and the log line reads `DONE WITH FAILURES`.
+
+**Verified:** ran once by hand — 31 MB database dump plus a 4 KB config archive landed in the
+Dropbox folder, `exit=0`. `cron` is active.
+
+**Not automated: restore verification.** Run `wd-backup verify <file>` by hand every so often —
+a backup nobody has restored is a hypothesis, which is the whole lesson of this item.
 
 #### Rebuild-from-empty
 

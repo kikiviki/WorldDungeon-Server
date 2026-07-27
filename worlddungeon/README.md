@@ -104,10 +104,18 @@ instead:
 scratch — it never touches the live database. `restore` requires you to name the target database
 explicitly, and prompts twice if that target is the live one.
 
-**Note:** the stack's scheduled backups (`backup/backup-database.sh` via the `backup-cron`
-container) are **Dropbox-only and not currently running** — no container, and the script aborts
-without a `~/.dropbox_uploader` config. Until a schedule is agreed, backups are manual. See
-backlog F3.
+### Scheduled
+
+`wd-backup-nightly` runs from the `eqdev` crontab **daily at 04:00**, writing the database and
+server config to `/home/eqdev/Dropbox/eqemu/eq-serv-backup/` and pruning to 14 days. That folder
+is Dropbox-synced, so backups leave the box. It logs to `wd-backup.log` beside the dumps.
+
+Ignore the stack's own `backup-cron` container and `backup/backup-database.sh` — that container
+isn't running, and the script is Dropbox-uploader-only and aborts without a `~/.dropbox_uploader`
+config.
+
+**Restore verification is not automated.** Run `wd-backup verify <file>` by hand now and then —
+a backup nobody has restored is a hypothesis.
 
 ---
 
