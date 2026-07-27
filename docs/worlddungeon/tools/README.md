@@ -91,6 +91,7 @@ can round-trip between. That's a much stricter view — 94 components rather tha
 | `--max-segments N` | 1400 | Map detail per zone. Lower = smaller, faster files. |
 | `--engine E` | `neato` | `neato`, `sfdp`, `fdp`, `dot`, `circo`. Use `sfdp` above ~150 zones. |
 | `--labels` | off | Mark zone exits on each map with hoverable dots. |
+| `--center-edges` | off | Draw connections centre-to-centre instead of from real exit coords. |
 | `-o FILE` | `zone-graph.html` | Output path. |
 
 ### Reading the output
@@ -105,6 +106,26 @@ can round-trip between. That's a much stricter view — 94 components rather tha
 Where a pair has several mechanisms the strongest wins the styling — walking beats clicking —
 so `blackburrow ↔ jaggedpine` draws solid despite also having the ruby clicky. Hover lists
 every mechanism regardless.
+
+### Where connections attach
+
+Lines land on the **actual exit coordinates** on each map — the zone line or clicky you walk
+into — not on node centres. A small dot marks each anchored end.
+
+Coverage isn't total, so three sources are tried in order:
+
+1. `zone_points.x/y` — the exit itself. Only **48%** of pairs have it; the rest are
+   client-driven zone lines whose server row exists only to define the destination.
+2. `zone_points.target_*` of the **reverse** edge — where you land coming the other way is
+   right beside where you leave. Recovers another **30%**.
+3. `doors.pos_x/pos_y` for clicky portals, which nearly always have coordinates.
+
+The remaining ~21% fall back to node centres and are drawn **faded, with no dots** and an
+`[approximate: no exit coords]` note in the tooltip, so a guess never looks like a fact. Every
+run prints its anchored/total count. In practice: 88% on the full mainland, 100% on most
+small graphs.
+
+`--center-edges` reverts to centre-to-centre if you prefer the cleaner look.
 
 ### Worked examples
 

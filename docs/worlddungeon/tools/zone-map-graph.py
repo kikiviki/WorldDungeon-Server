@@ -9,6 +9,11 @@ maps, laid out as a flowchart, wired with connections read from the database.
   dotted script          - quest MovePC
   arrow  direction of travel; two-way connections get arrows at both ends
 
+Connections attach at the REAL exit coordinates on each map - the zone line or
+clicky you actually walk into - not at node centres. A dot marks each anchored
+end; faded lines with no dots had no usable coordinate. --center-edges reverts
+to centre-to-centre.
+
 Output is a single self-contained HTML file (inline SVG, pan/zoom, no external
 assets). Regenerate any time - nothing is cached.
 
@@ -108,6 +113,60 @@ def load_edges():
     ):
         edges.setdefault((a, b, t), d)
     return edges
+
+
+def load_anchors():
+    """
+    Where on each zone's map a connection physically attaches.
+
+    anchors[(a, b)] = (x, y) in MAP space - the spot in zone a you leave from
+    when travelling to b.
+
+    Coverage is imperfect, so three sources are tried in order:
+
+      1. zone_points.x/y      - the exit itself. Present for only 48% of pairs;
+                                the rest are client-driven zone lines whose
+                                server row exists to define the destination.
+      2. zone_points.target_* - of the REVERSE edge. Where you land in a when
+                                coming from b is right beside where you leave a
+                                for b. Recovers another 30%.
+      3. doors.pos_x/pos_y    - for clicky portals, which nearly always have it.
+
+    The remaining ~21% get no anchor and fall back to the node centre.
+    Several exits for one pair (a long border split into segments) are averaged.
+    """
+    own, back, door = defaultdict(list), defaultdict(list), defaultdict(list)
+
+    for a, b, x, y, tx, ty in run_sql(
+        "SELECT LOWER(zp.zone), LOWER(z2.short_name), zp.x, zp.y, zp.target_x, zp.target_y "
+        "FROM zone_points zp JOIN zone z2 ON z2.zoneidnumber=zp.target_zone_id "
+        "WHERE zp.zone<>z2.short_name AND zp.zone<>'' AND z2.short_name<>'';"
+    ):
+        x, y, tx, ty = float(x), float(y), float(tx), float(ty)
+        if (x, y) != (0.0, 0.0):
+            own[(a, b)].append((x, y))
+        if (tx, ty) != (0.0, 0.0):
+            back[(b, a)].append((tx, ty))      # arriving in b anchors b's side
+
+    for a, b, px, py, dx, dy in run_sql(
+        "SELECT LOWER(d.zone), LOWER(d.dest_zone), d.pos_x, d.pos_y, d.dest_x, d.dest_y "
+        "FROM doors d WHERE d.dest_zone NOT IN ('','NONE') AND d.dest_zone<>d.zone "
+        "AND d.dest_zone NOT REGEXP '^-?[0-9]+$';"
+    ):
+        px, py, dx, dy = float(px), float(py), float(dx), float(dy)
+        if (px, py) != (0.0, 0.0):
+            door[(a, b)].append((px, py))
+        if (dx, dy) != (0.0, 0.0):
+            door[(b, a)].append((dx, dy))
+
+    anchors = {}
+    for key in set(own) | set(back) | set(door):
+        pts = own.get(key) or back.get(key) or door.get(key)
+        if pts:
+            # Negate into map space (map(x,y) = -db(x,y)), then average.
+            anchors[key] = (-sum(p[0] for p in pts) / len(pts),
+                            -sum(p[1] for p in pts) / len(pts))
+    return anchors
 
 
 # ---------------------------------------------------------------- map files
@@ -353,6 +412,39 @@ def layout(zone_ids, edges, geom, engine, scale):
 HEADER_H = 26
 
 
+def node_transform(g):
+    """
+    Scale/offset placing a zone's map inside its node box, below the header.
+    Used both to draw the map and to place connection anchors on it, so the two
+    cannot drift apart.
+    """
+    _segs, _marks, (x0, y0, x1, y1) = g["map"]
+    bw, bh = max(x1 - x0, 1e-6), max(y1 - y0, 1e-6)
+    avail_w, avail_h = g["w"] - 12, g["h"] - HEADER_H - 8
+    s = min(avail_w / bw, avail_h / bh)
+    return s, 6 + (avail_w - bw * s) / 2, HEADER_H + 4 + (avail_h - bh * s) / 2
+
+
+def anchor_xy(zone, other, geom, pos, anchors):
+    """
+    Page-space point where zone's connection to other attaches, or the node
+    centre when there is no coordinate for it. Clamped inside the node box so
+    bad data can't fling an endpoint across the canvas.
+    """
+    g = geom[zone]
+    cx, cy = pos[zone]
+    a = anchors.get((zone, other))
+    if not a:
+        return cx, cy, False
+    s, ox, oy = node_transform(g)
+    _segs, _marks, (x0, y0, _x1, _y1) = g["map"]
+    lx = ox + (a[0] - x0) * s
+    ly = oy + (a[1] - y0) * s
+    lx = min(max(lx, 4), g["w"] - 4)
+    ly = min(max(ly, HEADER_H + 2), g["h"] - 4)
+    return cx - g["w"] / 2 + lx, cy - g["h"] / 2 + ly, True
+
+
 def clip_to_box(cx, cy, w, h, tx, ty):
     """Point where the ray (cx,cy)->(tx,ty) leaves the box, for arrow placement."""
     dx, dy = tx - cx, ty - cy
@@ -364,7 +456,7 @@ def clip_to_box(cx, cy, w, h, tx, ty):
     return cx + dx * s, cy + dy * s
 
 
-def render(zone_ids, zones, edges, geom, pos, args):
+def render(zone_ids, zones, edges, geom, pos, anchors, args):
     xs = [pos[z][0] - geom[z]["w"] / 2 for z in zone_ids]
     ys = [pos[z][1] - geom[z]["h"] / 2 for z in zone_ids]
     xe = [pos[z][0] + geom[z]["w"] / 2 for z in zone_ids]
@@ -393,10 +485,22 @@ def render(zone_ids, zones, edges, geom, pos, args):
              "door" if "door" in types else "script")
         dash, colour, _ = EDGE_STYLE[t]
 
-        ax, ay = pos[za]
-        bx, by = pos[zb]
-        a1x, a1y = clip_to_box(ax, ay, geom[za]["w"], geom[za]["h"], bx, by)
-        b1x, b1y = clip_to_box(bx, by, geom[zb]["w"], geom[zb]["h"], ax, ay)
+        if args.center_edges:
+            ax, ay = pos[za]
+            bx, by = pos[zb]
+            a1x, a1y = clip_to_box(ax, ay, geom[za]["w"], geom[za]["h"], bx, by)
+            b1x, b1y = clip_to_box(bx, by, geom[zb]["w"], geom[zb]["h"], ax, ay)
+            exact_a = exact_b = False
+        else:
+            # Attach at the real exit locations rather than the node centres.
+            a1x, a1y, exact_a = anchor_xy(za, zb, geom, pos, anchors)
+            b1x, b1y, exact_b = anchor_xy(zb, za, geom, pos, anchors)
+            # No coordinate on either side: fall back to centre-to-centre so the
+            # line still reads as a connection instead of vanishing into a corner.
+            if not exact_a:
+                a1x, a1y = clip_to_box(*pos[za], geom[za]["w"], geom[za]["h"], b1x, b1y)
+            if not exact_b:
+                b1x, b1y = clip_to_box(*pos[zb], geom[zb]["w"], geom[zb]["h"], a1x, a1y)
 
         fwd = any(a == za for a, _b, _t in members)
         rev = any(a == zb for a, _b, _t in members)
@@ -405,12 +509,18 @@ def render(zone_ids, zones, edges, geom, pos, args):
             mk += f' marker-end="url(#arw-{t})"'
         if rev:
             mk += f' marker-start="url(#arwr-{t})"'
+        approx = "" if (exact_a and exact_b) else "  [approximate: no exit coords]"
         tip = html.escape(f"{za} <-> {zb}: " + ", ".join(sorted(
-            f"{t2} ({detail.get((a, b, t2), '')})" for a, b, t2 in members)))
+            f"{t2} ({detail.get((a, b, t2), '')})" for a, b, t2 in members)) + approx)
         add(f'<path d="M{a1x - minx:.1f},{a1y - miny:.1f}L{b1x - minx:.1f},{b1y - miny:.1f}" '
-            f'stroke="{colour}" stroke-width="2.2" stroke-opacity=".85" '
+            f'stroke="{colour}" stroke-width="2.2" '
+            f'stroke-opacity="{".85" if (exact_a and exact_b) else ".45"}" '
             f'{"stroke-dasharray=" + chr(34) + dash + chr(34) if dash else ""}{mk}>'
             f'<title>{tip}</title></path>')
+        for px, py, ok in ((a1x, a1y, exact_a), (b1x, b1y, exact_b)):
+            if ok:
+                add(f'<circle cx="{px - minx:.1f}" cy="{py - miny:.1f}" r="2.6" '
+                    f'fill="{colour}" fill-opacity=".9"/>')
     add("</g>")
 
     # --- nodes ------------------------------------------------------------
@@ -431,12 +541,8 @@ def render(zone_ids, zones, edges, geom, pos, args):
             f'<title>{html.escape(long_name)}</title>')
 
         # map geometry, scaled into the body area below the header
-        segs, marks, (x0, y0, x1, y1) = g["map"]
-        bw, bh = max(x1 - x0, 1e-6), max(y1 - y0, 1e-6)
-        avail_w, avail_h = w - 12, h - HEADER_H - 8
-        s = min(avail_w / bw, avail_h / bh)
-        ox = 6 + (avail_w - bw * s) / 2
-        oy = HEADER_H + 4 + (avail_h - bh * s) / 2
+        segs, marks, (x0, y0, _x1, _y1) = g["map"]
+        s, ox, oy = node_transform(g)
 
         add(f'<g transform="translate({ox:.2f},{oy:.2f}) scale({s:.5f}) '
             f'translate({-x0:.2f},{-y0:.2f})" class="mapg">')
@@ -539,6 +645,9 @@ def main():
                    help="map line segments per zone before decimation")
     p.add_argument("--engine", default="neato", choices=["neato", "sfdp", "fdp", "dot", "circo"])
     p.add_argument("--labels", action="store_true", help="mark zone exits on each map")
+    p.add_argument("--center-edges", action="store_true",
+                   help="draw connections node-centre to node-centre instead of from "
+                        "their real exit coordinates")
     p.add_argument("-o", "--out", default="zone-graph.html")
     args = p.parse_args()
 
@@ -579,8 +688,14 @@ def main():
     pos = layout(sel, edges, geom, args.engine, args.node_size)
     sel = {z for z in sel if z in pos}
 
+    anchors = {} if args.center_edges else load_anchors()
+    if anchors:
+        wanted = [(a, b) for a, b, _t in edges if a in sel and b in sel]
+        hit = sum(1 for k in wanted if k in anchors)
+        print(f"    {hit}/{len(wanted)} connections anchored at real exit "
+              f"coordinates; the rest use node centres", file=sys.stderr)
     print("==> rendering", file=sys.stderr)
-    open(args.out, "w").write(render(sel, zones, edges, geom, pos, args))
+    open(args.out, "w").write(render(sel, zones, edges, geom, pos, anchors, args))
     n_edges = len({tuple(sorted((a, b))) for a, b, _t in edges if a in sel and b in sel})
     print(f"Wrote {args.out}  ({len(sel)} zones, {n_edges} connections)", file=sys.stderr)
 
