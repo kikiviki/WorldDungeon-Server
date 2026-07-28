@@ -1094,15 +1094,21 @@ Proposed: RoF2 → Kerra Isle (`kerraridge`, 405, -265, -5). Everything else →
 
 ### A12 — Flatten racial stats and universal darkvision · **M** · open · *pairs with A11*
 
-**Equal totals, ±15 swing.** `char_create_point_allocations` (109 rows), columns
+**Decided: baseline 80 per attribute, total 560, ±15 from baseline.** A race's flagship
+attribute may reach 95 (+15) and must be paid for by −15 spread across its others, so every
+race sums to exactly 560. `char_create_point_allocations` (109 rows), columns
 `base_str…base_cha` + `alloc_*`. Current base totals run **545–586 across 19 distinct totals**
-— races are not on equal footing today. Flattening means rewriting this table so every
-allocation sums to one chosen total, with no attribute more than +15 off the flat baseline.
+— races are not on equal footing today, so this is a real balance change, not a cosmetic one
+(Ogres and Trolls lose an absolute advantage).
 
-Worked example at a 560 total (7 × 80 baseline): a race's primary at 95 (+15) must be paid for
-by −15 spread across the rest. Note the table is keyed per race **and** class
-(`char_create_combinations.allocation_id` → here), so "per race" flattening means collapsing
-many allocation rows to one per race — likely far fewer than 109.
+The table is keyed per race **and** class (`char_create_combinations.allocation_id` → here), so
+per-race flattening collapses those 109 rows to roughly one per race (~16).
+
+**Racial identity moves from stats to the world.** Advantage becomes *size and traversal*, not
+numbers: large races (Ogre/Troll) clear tall steps and ledges a small race must jump for; small
+races (Halfling/Gnome) fit through narrow gaps without Shrink. This is a **zone-geometry design
+constraint, not a stat change** — it only exists if A7 topology deliberately builds for it.
+Record it there or it will not happen by accident.
 
 🔴 Same Titanium caveat as A11: `CheckCharCreateInfoTitanium()` (`world/client.cpp:2002`)
 validates against a **hardcoded `BaseRace[16][7]` C++ matrix** that ignores this table. RoF2
@@ -1142,6 +1148,40 @@ Note 2HP and Martial are *not* contiguous with the rest — 35 and 45.
 **Hook:** `EVENT_ITEM_CLICK` exists in both parsers (`zone/embparser.cpp:115`). No custom spell
 is required — click straight into script, delete, and summon the next id. A click *effect*
 spell is only needed if the cycle should also be castable.
+
+**Pre-T1 ("T0") stat line.** Slots under T1 from *Gear System* §2.3 (T1 = 1H 12 / 2H 22,
+levels 6–12), so T0 serves levels 1–5 at roughly two-thirds of T1 damage, **0 aug sockets**:
+
+| Form | `itemtype` | dmg | delay |
+|---|---|---|---|
+| 1HS / 1HP / 1HB | 0 / 2 / 3 | 8 | 28 |
+| Martial | 45 | 8 | 26 |
+| 2HS / 2HB | 1 / 4 | 14 | 40 |
+| 2HP | 35 | 14 | 40 |
+
+🔴 **Delay is a new number — the vault does not specify delay at any tier.** *Gear System* §2.3
+gives damage only, so the entire T1–T10 curve is underspecified: ratio (dmg ÷ delay) is what
+sets DPS, not damage alone. The delays above are proposals consistent with EQ norms. **Settle
+the tier-wide delay convention before authoring T0**, or T0 will anchor a curve nobody chose.
+
+**Per-class starting form.** All 7 items are all/all and any player can cycle to any form; the
+class only decides which form is *granted* at creation:
+
+| Form | Classes |
+|---|---|
+| 1HB | Cleric, Druid, Shaman, Wizard, Magician, Enchanter, Necromancer |
+| 1HS | Warrior, Paladin, Shadowknight, Ranger, Bard |
+| 1HP | **Rogue** |
+| Martial | Monk, Beastlord |
+| 2HS | **Berserker** |
+
+- **Rogue must start 1HP.** Backstab hard-requires `ItemType1HPiercing` in
+  `zone/special_attacks.cpp:724` — any other form silently disables the class's core attack.
+- **Berserker starts 2HS** per the vault's "native: 2H glass-cannon" identity
+  (*Classes & Paragon Paths*).
+
+**ID band:** `items.id` 1,000,000–1,000,999 is A4 tokens (F1). Propose **1,001,000–1,001,006**
+for the seven forms, leaving 1,001,007–1,001,099 for later starter gear.
 
 **Gotchas to design around:**
 
