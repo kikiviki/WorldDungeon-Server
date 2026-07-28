@@ -1180,8 +1180,45 @@ class only decides which form is *granted* at creation:
 - **Berserker starts 2HS** per the vault's "native: 2H glass-cannon" identity
   (*Classes & Paragon Paths*).
 
+**Worn regen on all 7 forms:** `items.regen` = 1, `items.manaregen` = 1,
+`items.enduranceregen` = 1. Plain columns, no effect scripting.
+
 **ID band:** `items.id` 1,000,000–1,000,999 is A4 tokens (F1). Propose **1,001,000–1,001,006**
 for the seven forms, leaving 1,001,007–1,001,099 for later starter gear.
+
+**Starting weapon skill 10 — this is `skill_caps` data, NOT a Lua script.**
+`Client::SetClassStartingSkills()` (`world/client.cpp:2167`) already walks every skill and
+assigns `GetSkillCap(class, skill, 1).cap` — the level-1 cap — at character creation. So a new
+character *already* starts at whatever the level-1 cap says. Nothing needs to run at login;
+raising the cap raises the granted skill for free.
+
+Level-1 caps today, for the seven weapon skills (`0`=1HB, `1`=1HS, `2`=2HB, `3`=2HS, `28`=H2H,
+`36`=1HP, `77`=2HP) — **missing skill = no row = cap 0**:
+
+| Class | Level-1 caps | Gap |
+|---|---|---|
+| War, Pal, Rng, SK (1,3,4,5) | all 10 except H2H 4 | H2H only |
+| Monk (7) | 1HB 10, 2HB 10, H2H 10 | missing 1HS/2HS/1HP/2HP |
+| Beastlord (15) | 1HB/2HB/H2H/1HP 10 | missing 1HS/2HS/2HP |
+| Bard, Rogue (8,9) | 1HB/1HS/1HP 10, H2H 4 | missing 2HB/2HS/2HP |
+| Berserker (16) | 2HB/2HS/2HP 10, H2H 5 | missing 1HB/1HS/1HP |
+| Cleric (2) | 1HB **5**, 2HB **5**, H2H 3 | capped at 5, four skills missing |
+| Druid (6) | 1HB/1HS/2HB **5**, H2H 3 | capped at 5 |
+| Shaman (10) | 1HB/2HB/1HP **5**, H2H 3 | capped at 5 |
+| Nec, Wiz, Mag, Enc (11–14) | 1HB/2HB/1HP **4**, H2H 3 | capped at **4** |
+
+🔴 **Casters and priests cannot reach 10 at level 1** — their caps are 4–5, and most classes are
+missing rows entirely for skills they were never meant to use. Under A11 (any race, any class,
+all/all weapons) those missing rows mean a Wizard handed a 2HS has **skill cap 0** and cannot
+train it at any level.
+
+So the real work is a `skill_caps` pass: rows for **all 7 weapon skills × all 16 classes**, at
+level 1 *and across the full level curve* — not just level 1. A level-1-only fix leaves a
+Cleric's 1HS frozen at 10 forever. Size this against the class-identity intent: full parity
+means weapon skill stops distinguishing classes at all.
+
+Order matters: **do the `skill_caps` pass before granting the weapon**, or the first characters
+created get baked-in low skills that a later cap change will not retroactively raise.
 
 **Gotchas to design around:**
 
