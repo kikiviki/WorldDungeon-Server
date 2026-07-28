@@ -185,13 +185,22 @@ focus path) is **independent of the defect** and is the one genuinely open quest
    unapplied behind the `0004` gate. `0007`'s test matrix **is** W1's done-when check.
    **Deferred:** Thermal Shock 15 + Cascade 16 (W1 extension), mana ward 17–19 (W4 pkg),
    black hole 20–23, Careful Caster 28, ports 29–30, Sculpt→AE-lure gate.
-2. **Passive heal-potency AA line** — the bulk of the Cleric's heal curve (~115% of SPA 125
-   across its ranks). AA rank effects carry SPA 125 natively (`zone/bonuses.cpp:4126`) and land
-   in `realTotal3`, which **sums** with the mantle and with gear. Authoring it in AA rather than
-   in the mantle keeps Mk. I relevant and stops a large mantle value masking gear focus.
-3. **Cleric smite + recourse, HP buffs, worship lines, health balance** — remembering SPA 153's
+2. **Standard Mantle is now a SUSTAIN posture** (migration `0012`) — SPA 132 mana cost
+   −10/18/25%, SPA 127 cast time −5/10/15%, SPA 125 heal +10/20/30%.
+
+   **Why:** focus values never scale with level — `CalcFocusEffect` assigns raw `base_value`
+   and never routes through `CalcSpellEffectValue`, verified across all six heal-focus SPAs
+   (392–396, 413). So a growing heal % could only come from AA handouts, which was rejected.
+   The resolution is that **efficiency percentages don't need level scaling; throughput
+   percentages do** — a 25% mana discount is worth the same at 65 as at 10. This also restores
+   the vault's own wording (Cleric §9a: *"+healing **efficiency**"*), which the implementation
+   had drifted away from. W13 made it possible by freeing the effect layout.
+
+   Heal *throughput* scaling comes from gear (focus + `+heal` stats) and from the heal spells'
+   own `formula 105`, not from the mantle.
+4. **Cleric smite + recourse, HP buffs, worship lines, health balance** — remembering SPA 153's
    **inverted sign** (positive base = penalty).
-4. **Monk pools** — offense then defense. Each stance needs its **own proc** (decided), and each
+5. **Monk pools** — offense then defense. Each stance needs its **own proc** (decided), and each
    pool needs its shared layout budgeted *before* any of it is authored.
 
 ### Open items carried forward
@@ -202,7 +211,7 @@ focus path) is **independent of the defect** and is the one genuinely open quest
 | GCD / recast on same-layout overwrite | Decides how fluid stance swapping feels. Unverified. |
 | Recourse behaviour on partial resist | Cleric smite. Unverified. |
 | ~~Focus effects select one best/worst, they don't sum~~ | ✅ **WRONG — corrected.** `GetFocusEffect` returns `realTotal + realTotal2 + realTotal3 + worneffect_bonus` (`zone/spell_effects.cpp:6886`): **item, spell/buff and AA sources SUM.** "Best wins" applies only *within* a source. Mantle + gear + AA all stack. |
-| **Passive heal-potency AA line not authored** | Carries ~115% of the Standard Mantle's ~150% target curve. Until it exists the Cleric tops out near +35%, so step 6 will show a real but modest gain — expected, not a failure. See migration `0011`. |
+| ~~Passive heal-potency AA line~~ | **Dropped.** Handing out ~115% via AA gives power the player did not specifically invest in. Resolved instead by reworking the mantle — see below. |
 | Darkvision SPA (Badger) | Low priority. |
 | Weapon types vs. §2.1 | Design question, not source. |
 
