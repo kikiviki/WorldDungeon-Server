@@ -1160,7 +1160,23 @@ Proposed: RoF2 → Kerra Isle (`kerraridge`, 405, -265, -5). Everything else →
 - **No starting gear + no starting zone gear source** means a naked level 1 with no weapon.
   Confirm the first-hour path exists before clearing `starting_items`.
 
-### A12 — Flatten racial stats and universal darkvision · **M** · open · *pairs with A11*
+### A12 — Flatten racial stats and universal darkvision · **M** · *stats applied (0023), darkvision open* · *pairs with A11*
+
+> **Stats: done, migration `0023_flatten_racial_base_stats`.** All 109
+> `char_create_point_allocations` rows total exactly 560 with every attribute inside 65–95.
+> Flagship per race at 95, chosen as the highest stock average across that race's own rows so
+> flattening preserved existing flavour; Human is flat 80s as the yardstick. Rows 66 and 69
+> are orphaned (no `char_create_combinations` reference) and were flattened explicitly so the
+> whole-table invariant holds.
+>
+> **`alloc_*` deliberately left alone — decided.** It is `DefaultPointAllocation`, a 25-point
+> pool the player redistributes at creation, so a delivered character totals 585 and can reach
+> 120 in one attribute. Kept, because the pool is race-neutral and so does not affect the equal
+> footing this item is actually about. The ±15 bound below applies to the **base row**, not to
+> the delivered character — the In-Game Test Checklist was reworded to match.
+>
+> **Darkvision is still open** — neither route below has been built, and the choice between
+> them is still undecided.
 
 **Decided: baseline 80 per attribute, total 560, ±15 from baseline.** A race's flagship
 attribute may reach 95 (+15) and must be paid for by −15 spread across its others, so every
