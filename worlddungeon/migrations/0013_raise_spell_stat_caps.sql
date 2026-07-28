@@ -1,0 +1,72 @@
+-- 0013_raise_spell_stat_caps
+--
+-- Purpose: raise the +heal and +spell-damage gear caps from 250 to 1000, to be
+-- the design's hard ceiling on direct spell damage and healing bonuses.
+--
+-- ID ranges claimed: none. Rule values only.
+--
+-- Idempotent: REPLACE INTO on the natural key (ruleset_id, rule_name).
+--
+-- SERVER-SIDE ONLY - NO CLIENT CHANGE NEEDED. Both caps are enforced when
+-- itembonuses are computed (zone/bonuses.cpp:244-245, 356-357). The client only
+-- ever displays the item's stat; it takes no part in applying it.
+--
+-- Requires a rule reload to take effect: #reloadrules, or a server restart.
+--
+--
+-- ===================== ⚠️ READ BEFORE TUNING GEAR AGAINST 1000 ===============
+--
+-- Raising this rule alone will NOT let a +1000 heal item add 1000 to a heal.
+-- A SECOND, HARDCODED CAP binds first, in Mob::GetExtraSpellAmt()
+-- (zone/effects.cpp:392-394):
+--
+--     //Confirmed with parsing 10/9/21 ~Kayen
+--     if (extra_spell_amt * 2 > std::abs(base_spell_dmg)) {
+--         extra_spell_amt = std::abs(base_spell_dmg) / 2;
+--     }
+--
+-- The item contribution can never exceed HALF THE SPELL'S OWN BASE VALUE. It is
+-- not a rule and cannot be changed from data.
+--
+-- Before that, the stat is also scaled by total cast time (effects.cpp:383-389):
+-- spells at or under 2.5s get only 25% of the stat; longer casts scale up toward
+-- the full value at 7s.
+--
+-- Worked example. Intercession Mk. III heals 320 at level 65. The item
+-- contribution is capped at 320/2 = 160 no matter what. A 250 heal-amt item
+-- ALREADY exceeds that. So for today's spell values, raising the rule to 1000
+-- changes nothing at all - the binding constraint is the spell's base value, not
+-- the rule.
+--
+-- THE RULE IS RAISED ANYWAY because it is the right ceiling to design toward:
+-- it stops being the limiter, leaving base spell values as the single lever, and
+-- it gives headroom if base values grow.
+--
+-- If +heal gear should genuinely reach toward 1000, ONE OF THESE IS ALSO NEEDED:
+--
+--   (a) Raise base spell values. An item can contribute 1000 only when the spell
+--       itself heals 2000+. Keeps all stock balancing intact. Preferred.
+--   (b) Set Spells:FlatItemExtraSpellAmt = true. GetExtraSpellAmt then RETURNS
+--       EARLY (effects.cpp:368-374), skipping BOTH the cast-time scaling and the
+--       base/2 cap, so the stat applies at full face value. One rule, no code -
+--       but it removes the balancing that stops short-cast spells benefiting
+--       disproportionately, so a fast nuke would gain as much as a long heal.
+--   (c) Patch the base/2 clamp in C++. Smallest behavioural change, but it is a
+--       stock formula and a merge-surface cost.
+--
+-- NOT DECIDED HERE - (b) is one line if wanted, but it is a real balance change
+-- and belongs to whoever owns the gear curve.
+-- ============================================================================
+
+REPLACE INTO rule_values (ruleset_id, rule_name, rule_value, notes) VALUES
+  (1, 'Character:ItemHealAmtCap',  '1000', 'WD: raised from 250. Design ceiling for +heal gear. See migration 0013 - the base/2 clamp in GetExtraSpellAmt binds first.'),
+  (1, 'Character:ItemSpellDmgCap', '1000', 'WD: raised from 250. Design ceiling for +spell damage gear. See migration 0013 - the base/2 clamp in GetExtraSpellAmt binds first.');
+
+-- Hastev3Cap (SPA 119 overhaste, which the Monk's Hummingbird stance uses) is
+-- LEFT AT 25. It is equally a rule and equally server-side, so it can be raised
+-- the same way at any time - but no target value has been chosen, and 25 is the
+-- stock live figure. Budget Hummingbird's three tiers inside 0-25 until then.
+--
+-- To raise it later, all four variants should move together or NPCs, bots and
+-- mercs will diverge from players:
+--   Character:Hastev3Cap · NPC:NPCHastev3Cap · Bots:BotsHastev3Cap · Mercs:MercsHastev3Cap

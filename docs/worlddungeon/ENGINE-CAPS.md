@@ -19,8 +19,8 @@ These cap what **worn gear** contributes. They are the ceiling on gear progressi
 
 | Rule | Cap | Notes |
 |---|---:|---|
-| `ItemHealAmtCap` | **250** | ⚠️ **hard** — no bonus extension |
-| `ItemSpellDmgCap` | **250** | ⚠️ **hard** — no bonus extension |
+| `ItemHealAmtCap` | ~~250~~ → **1000** | raised by `0013`; a second clamp binds first — see §1a |
+| `ItemSpellDmgCap` | ~~250~~ → **1000** | raised by `0013`; same caveat |
 | `ItemATKCap` | 250 | **extensible** — `+ itembonuses/spellbonuses/aabonuses.ItemATKCap` |
 | `ItemAccuracyCap` | 150 | |
 | `ItemExtraDmgCap` | 150 | bonuses to Bash, Frenzy, etc. |
@@ -42,10 +42,70 @@ These cap what **worn gear** contributes. They are the ceiling on gear progressi
 > Note the clamp is `IsOfClientBotMerc()`-gated and applies to **`itembonuses` only** — heal
 > amount granted by *spells* or *AA* is not subject to it.
 
-**Decision needed if the design wants a longer gear ladder:** raise the rule server-side (one
-value, low risk, it is already a rule) or accept 250 as the design ceiling. **Recommend accepting
-250 for v1** and spending the range properly, rather than diverging from stock for headroom
-nothing yet needs.
+### 1a. 🔴 The item contribution is *also* capped at half the spell's base value
+
+Raised to 1000 by migration `0013`. **But the rule is rarely the binding constraint.**
+`Mob::GetExtraSpellAmt()` (`zone/effects.cpp:392`) clamps the contribution to half the spell's
+own base:
+
+```cpp
+//Confirmed with parsing 10/9/21 ~Kayen
+if (extra_spell_amt * 2 > std::abs(base_spell_dmg)) {
+    extra_spell_amt = std::abs(base_spell_dmg) / 2;   // hardcoded, not a rule
+}
+```
+
+And before that it is scaled by **total cast time** (`effects.cpp:383-389`): spells at or under
+2.5s receive only **25%** of the stat; longer casts scale toward full value at 7s.
+
+**Worked example.** Intercession Mk. III heals 320 at 65 → the item contribution caps at **160**,
+whatever the item says. A 250 heal-amt item already exceeds that, so raising the rule to 1000
+changes nothing for today's spell values.
+
+**So the real lever on +heal / +spell-damage gear is the base spell value, not the cap.** An item
+can contribute 1000 only against a spell that heals 2000+.
+
+Three ways to make 1000 genuinely reachable, none yet chosen:
+
+| | Approach | Cost |
+|---|---|---|
+| **(a)** | Raise base spell values | none — all stock balancing intact. **Preferred.** |
+| **(b)** | `Spells:FlatItemExtraSpellAmt = true` | one rule; `GetExtraSpellAmt` returns early (`effects.cpp:368`), skipping **both** the cast-time scaling **and** the base/2 clamp. But a fast nuke then gains as much as a long heal. |
+| **(c)** | Patch the base/2 clamp in C++ | smallest behavioural change, but it is a stock formula — merge surface. |
+
+### 1b. Order of operations — heal calculation
+
+`Mob::GetActSpellHealing()`, `zone/effects.cpp:421-500`. **Percentages apply to `base_value`, not
+to the running total**, so they add rather than compound:
+
+```
+base_value = <spell value after level scaling>
+
+value  = base_value
+value += base_value × ClericInnateHealFocus%     (5%)
+value += base_value × focusImprovedHeal%         (SPA 125)
+value += base_value × focusFcAmplifyMod%
+value += base_value × focusFcHealPctIncoming%    (SPA 393, on target)
+value += focusFcHealAmtCrit                      (SPA 396, flat)
+value += GetExtraSpellAmt(...)                   ← ITEM +heal, capped at base/2
+value += value × GetHealRate()%                  (SPA 120, on running total)
+value *= critical_modifier                       ← CRIT (×2)
+value += focusFcHealAmt                          (SPA 392, flat, AFTER crit)
+value += focusFcHealAmtIncoming                  (SPA 394, flat, after crit)
+```
+
+**Answering the worked question directly:** a 100-heal spell with a 25% focus and +10 item heal
+gives **100 + 25 + 10 = 135**. The first model is right — the item bonus is *not* multiplied by
+the focus percentage.
+
+Two consequences worth designing around:
+
+- **Percentages are additive against base, not multiplicative with each other.** 25% focus + 5%
+  innate = `base × 1.30`, not `base × 1.25 × 1.05`. Predictable, and it means focus stacking
+  degrades linearly rather than exploding.
+- 🔑 **Item +heal is doubled by crits; SPA 392 is not.** `GetExtraSpellAmt` is added *before*
+  `value *= critical_modifier`, while `focusFcHealAmt` (392) is added *after*. So on a crit-heavy
+  build, item +heal is worth roughly **twice** the same number delivered via SPA 392.
 
 ---
 
