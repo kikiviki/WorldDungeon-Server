@@ -209,8 +209,24 @@ focus path) is **independent of the defect** and is the one genuinely open quest
 combo checked against T10: 32% of an 8,300 HP mob raw, up to ~127% geared and critting. See
 [ENGINE-CAPS.md](ENGINE-CAPS.md) §6.
 
-⏳ **Necro (`0009`, 30 caps) deferred to its own pass** — DoT damage is per-tick over a duration,
-so the nuke rule does not transfer. `0005` has 3 remaining (`formula 102` lines).
+✅ **Necro done** — `0009` retuned (33 rows). Sustained 342 DPS vs Wizard 287; rushed opener 169
+vs 259. Both halves of the brief satisfied. See [ENGINE-CAPS.md](ENGINE-CAPS.md) §7.
+`0005` has 3 remaining (`formula 102` lines).
+
+### 💡 Design note — Druid and Necro are the same mechanic, mirrored
+
+**Druid DoTs spread *before* the target dies; Necro DoTs spread *after* it dies.** Both give the
+class AoE capability, which matters at higher tiers, via visibly different mechanics — and
+contagion spreading from a corpse is exactly the Necro's fantasy.
+
+**The engine implication is significant.** W9 (DoT spread) is flagged as *the one item with real
+performance-budget risk*, because the Druid version needs a **per-tick target scan**. The Necro
+version has no per-tick cost at all — it fires **once, on death**. And that hook already exists:
+`NPC::Death()` at `zone/attack.cpp:2542` already resolves the owner and is the site S2 identified.
+
+So **the Necro half of W9 is close to free and should be built first**, both to derisk the
+pattern and because it may cover more of the design than the expensive Druid half. Revisit W9's
+scoping with this in mind.
 
 A caps audit found **59 inert `max` values** across `0005`/`0006`/`0007`/`0009` — caps set above
 what level 65 can reach, so they never bind. **All three Meteor tiers deliver identical damage at

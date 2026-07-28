@@ -343,6 +343,35 @@ Wizard landing a crit on the opener is deleting most of one. That reads as a bur
 
 ---
 
+## 7. Necromancer pass — DPS shape vs the Wizard
+
+`0009` retuned (33 rows); all three migrations re-audited to **0 inert caps**.
+
+> ⚠️ **Grouping bug worth remembering.** The first retune grouped tiers by `spellgroup` and was
+> wrong: **`511001` holds two different lines** (Venom of Nagafen *and* Miasma), so the slope was
+> derived from the wrong tier's cap and Venom stayed inert. `512001` had the same problem on the
+> Wizard side. **Group by spell line — the name minus its `Mk.` suffix — never by `spellgroup`.**
+> A spellgroup is a scribing/exclusivity key and is not one-to-one with a spell line.
+
+Design brief: *Necro sustained > Wizard, with a longer ramp; but a rushed 3-DoT + burst opener
+should land slightly under the Wizard.*
+
+| | Wizard | Necro | |
+|---|---:|---:|---|
+| **Sustained DPS** | 287 | **342** | ✅ Necro ahead, as intended |
+| **Rushed / burst opener** | 259 | **169** | ✅ Necro behind, as intended |
+| Ramp to full output | ~1 cast | **13.5s** (3 casts + first ticks) | ✅ the intended cost |
+
+Necro sustained = 3 DoTs at 820/tick per 6s (137 DPS) **+ Ignite Bones filler** (615 per 3s,
+205 DPS). **The filler is doing 60% of the work** — worth knowing, because it means Necro DPS is
+far more sensitive to Ignite Bones' recast than to DoT magnitude.
+
+Same caveat as the Wizard table: **no focus or crit values exist yet**, so these are authored
+base numbers only. Re-run once those land — crit favours the Wizard's big single hits more than
+the Necro's many small ticks, so the gap will narrow.
+
+---
+
 ## Open
 
 - Damage focus (`focusImprovedDamage`, SPA 124/`ImprovedDamage2`) cap — not yet checked; relevant
