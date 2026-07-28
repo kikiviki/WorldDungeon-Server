@@ -217,11 +217,68 @@ focus path) is **independent of the defect** and is the one genuinely open quest
      involve no AI decision. **This changes the design** — magician.md §9a calls Air "the caster
      servant", and under this decision there is no caster servant; Air becomes a lightning-proc
      striker. *Reflect back into the vault.*
-   - ⏳ **Next:** `npc_spells_effects` rows giving each element its identity (Fire's damage
+   - 🔴 **DECIDED, NOT YET BUILT — collapse `0015` from 12 templates to 4.** Pets scale to the
+     caster instead of being pre-baked per tier. See *Pet scaling handoff* below.
+   - ⏳ **Then:** `npc_spells_effects` rows giving each element its identity (Fire's damage
      shield, Water's group heal-on-hit, Earth's mitigation ward, Air's lightning procs). Until
      those land the four servants differ only in stats and will feel far more alike than
      intended. Then spells 1–4 (SPA 33 → the `WD<Element>Mk<N>` type strings, SPA 167 pet power
      rising per tier).
+
+---
+
+## 🔀 Pet scaling handoff — start here next session
+
+**Goal:** one template per element instead of three, with the pet scaling to the caster on spawn.
+
+| Tier | Pet level |
+|---|---|
+| Mk. I | caster level **− 1** (floor 1) |
+| Mk. II | caster level **+ 3** |
+| Mk. III | caster level **+ 5** |
+
+### Why this needs no C++
+
+The pet is summoned, then a Lua `EVENT_SPAWN` script sets **both level and stats explicitly**.
+Because the script writes the final values itself, it never depends on `SetLevel()` recalculating
+level-derived stats — which was the one open risk in the earlier plan and is now designed out.
+
+Verified available:
+
+| Need | Mechanism |
+|---|---|
+| Owner is known at spawn | Pet is built as `new Pet(npc_type, this, …)` with the owner passed in, **before** `entity_list.AddNPC()` fires the event (`zone/pets.cpp:283`) |
+| Set level from Lua | `SetLevel` — `zone/lua_mob.h:65` |
+| Set hp / AC / damage from Lua | `ModifyNPCStat(stat, value)` — `zone/lua_npc.h:140`, impl `zone/npc.cpp:2261` |
+| Native stat scaling (optional) | `pets.petpower = -1` scales hp/AC/damage/size off SPA 167 (`zone/pets.cpp:122-136`) |
+
+**Prefer explicit Lua values over `petpower = -1`.** Native scaling raises level off the
+*template's* base, not the caster's, and caps at `Pets:PetPowerLevelCap` = **10**. Setting
+everything in the script keeps one source of truth and removes the cap from the picture.
+
+### Work items
+
+1. **Rewrite `0015`** — supersede it (it is applied? **no, still unapplied**, so edit in place):
+   4 `npc_types` rows (one per element) and 4 `pets` rows, dropping the Mk. I/II/III triples.
+   Frees `3,000,004–3,000,033` back to the F1 overflow band; update the claim table in
+   [F1-ID-RANGES.md](F1-ID-RANGES.md).
+2. **Write the shared spawn script** — one Lua file for all four elements. It needs to know which
+   tier summoned it; the cleanest signal is a distinct `pets.type` per tier still pointing at the
+   **same** `npcID`, so `WDFireMkI/II/III` all resolve to one template and the script reads the
+   tier from the type string.
+3. **Decide the stat curve per level** — the template stops being a stat block and becomes a
+   shape; the script supplies numbers. Base them on the stock ladder already recorded in `0015`'s
+   header (SumAirR16 at 65: 5,600 hp / 287 AC / 28–104 dmg).
+4. **Then** author spells 1–4 with SPA 33 → the type strings.
+
+### Watch for
+
+- **A pet above the caster's level.** Mk. III at caster + 5 means a level-65 Magician fields a
+  level-70 pet. Check that nothing (con colour, XP, spell level checks, `MaxLevel` = 65) misbehaves
+  — this is the sort of thing that works fine until it very suddenly does not.
+- **Level floor.** Mk. I at caster − 1 must clamp at 1, or a level-1 Magician summons a level-0 pet.
+- The four servants still have **no abilities** (`npc_spells_id` and `npc_spells_effects_id` both
+  0), so they will feel alike regardless of scaling until the effects rows land.
    - ⏳ Spells 6, 7, 11–17 carry unresolved ⚠️ (AEMelee shape, pet avoidance SPA, non-caster aura
      anchoring, the familiar graft mechanism) — source verification needed.
    - ⏳ Spells 23–27 summon **items** and need ids from the 1,000,000+ band.
