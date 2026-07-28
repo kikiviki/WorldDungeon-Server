@@ -205,6 +205,13 @@ focus path) is **independent of the defect** and is the one genuinely open quest
 
 ### 🔴 Retune the unapplied migrations against [ENGINE-CAPS.md](ENGINE-CAPS.md)
 
+✅ **Wizard done** — `0006`/`0007` retuned (26 caps), re-audited to **0 inert**, and the Mk. III
+combo checked against T10: 32% of an 8,300 HP mob raw, up to ~127% geared and critting. See
+[ENGINE-CAPS.md](ENGINE-CAPS.md) §6.
+
+⏳ **Necro (`0009`, 30 caps) deferred to its own pass** — DoT damage is per-tick over a duration,
+so the nuke rule does not transfer. `0005` has 3 remaining (`formula 102` lines).
+
 A caps audit found **59 inert `max` values** across `0005`/`0006`/`0007`/`0009` — caps set above
 what level 65 can reach, so they never bind. **All three Meteor tiers deliver identical damage at
 65**, as do Asteroid, both Burst lines, both Shower lines and the Lures. The Wizard's tier system

@@ -297,6 +297,52 @@ Remaining checks before applying:
 
 ---
 
+---
+
+## 6. Wizard "big boom" check against T10
+
+**Retune applied.** `0006`/`0007` had 26 inert caps; the authored caps were taken as the design
+intent and the **slope** raised so they became reachable, per the decision that "caps are the
+intent". Formula values 1–99 (avoiding 0, 60, 70, which have explicit cases) use
+`base + level × formula`.
+
+| Line | base | slope | Mk. I / II / III caps | raw @65 |
+|---|---:|---:|---|---:|
+| Lure of Flame | 10 | 2 | 60 / 90 / 140 | 140 |
+| Fire Burst | 50 | 7 | 200 / 340 / 505 | 505 |
+| Meteor | 120 | **15** | 450 / 750 / **1095** | 1095 |
+| Meteor Shower | 80 | 10 | 300 / 500 / 730 | 730 |
+
+Re-audited from a scratch load: **0 inert caps remain**.
+
+### Full Mk. III combo vs. a T10 mob (8,300 HP, *Mob Scaling* §4)
+
+Lure Mk. III (130 + a **−60 fire resist** debuff) → Meteor Mk. III (1,095) → both SPA 374 riders
+firing Ignition and Rime payloads (710 each):
+
+| Scenario | Damage | % of T10 EHP |
+|---|---:|---:|
+| Raw — no gear, focus or crit | 2,645 | **32%** |
+| + spell-damage gear at the base/2 clamp | 3,967 | 48% |
+| + 50% `ImprovedDamage` focus | 5,290 | 64% |
+| + crit on Meteor only (×2) | 7,480 | 90% |
+| + crit on everything (×2) | 10,580 | **127%** |
+
+**The "big boom" holds.** A bare combo removes about a third of a T10 mob; a geared, focused
+Wizard landing a crit on the opener is deleting most of one. That reads as a burst class.
+
+> ⚠️ **Assumptions, not authored values.** Focus and crit rates are placeholders — no
+> `ImprovedDamage` focus and no Wizard crit AA exist yet. The **only** figure grounded in
+> authored data is the 32% raw row. Treat the rest as the shape of the curve, and re-run this
+> once crit and focus are real.
+>
+> Two things to watch as those land: the base/2 clamp means **spell-damage gear can never add
+> more than 50%**, so gear is a weaker lever than it looks; and the top row exceeding 100% means
+> **crit rate is the balance dial**, not base damage — small crit-chance changes swing the whole
+> curve.
+
+---
+
 ## Open
 
 - Damage focus (`focusImprovedDamage`, SPA 124/`ImprovedDamage2`) cap — not yet checked; relevant
