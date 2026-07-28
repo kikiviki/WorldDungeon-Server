@@ -1074,7 +1074,13 @@ Needs the EQEmu Recommended-Level formula verified in source (vault *Open Decisi
 
 v1 wants 2–3 only: Fleer + Bloater + one Warded type.
 
-### A11 — Open character creation · **M** · open · *no dependencies*
+### A11 — Open character creation · **M** · 🚧 **partly applied** · *no dependencies*
+
+> **Landed 2026-07-28, live on the dev server, untested in-game:** migration **0016** (ogre
+> stun immunity off, tutorial disabled) and **0017** (Kerra Isle depop via content flag).
+> Engine change **W14** is deployed in the same binary. Test steps are in the vault:
+> *03 Code & Technical / In-Game Test Checklist*. Remaining: items 3 and 4 below
+> (combos, stats, entry point, starting gear) — migrations 0018–0021.
 
 Any race may be any class; racial combat traits removed; no starting gear; everyone lands in
 one controlled entry point. Four separable pieces — the first is nearly free, the last is the
