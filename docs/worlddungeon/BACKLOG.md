@@ -217,8 +217,8 @@ focus path) is **independent of the defect** and is the one genuinely open quest
      involve no AI decision. **This changes the design** — magician.md §9a calls Air "the caster
      servant", and under this decision there is no caster servant; Air becomes a lightning-proc
      striker. *Reflect back into the vault.*
-   - 🔴 **DECIDED, NOT YET BUILT — collapse `0015` from 12 templates to 4.** Pets scale to the
-     caster instead of being pre-baked per tier. See *Pet scaling handoff* below.
+   - ✅ **`0015` collapsed from 12 templates to 4** — pets scale to the caster at spawn via
+     `lua_modules/wd_servant.lua`. See *Pet scaling handoff* below.
    - ⏳ **Then:** `npc_spells_effects` rows giving each element its identity (Fire's damage
      shield, Water's group heal-on-hit, Earth's mitigation ward, Air's lightning procs). Until
      those land the four servants differ only in stats and will feel far more alike than
@@ -227,9 +227,22 @@ focus path) is **independent of the defect** and is the one genuinely open quest
 
 ---
 
-## 🔀 Pet scaling handoff — start here next session
+## 🔀 Pet scaling handoff — ✅ built (items 1–3); spells 1–4 remain
 
 **Goal:** one template per element instead of three, with the pet scaling to the caster on spawn.
+
+**Done 2026-07-28:** `0015` rewritten in place to 4 templates (`3,000,001–3,000,004`, F1 claim
+table updated), SQL re-validated by rollback (4 npc rows, 12 pets rows, 4 distinct templates).
+Shared scaling module at `server/quests/lua_modules/wd_servant.lua` with thin wrappers
+`server/quests/global/300000{1-4}.lua`; both `luac -p` clean. **One deviation from the plan
+below:** the tier is read from **`GetPetSpellID()`**, not the `pets.type` string — the type
+string is not reachable from Lua, and the Pet constructor stores the spell id before
+`AddNPC()` fires `EVENT_SPAWN`, so the spell id (43,660–43,671, fixed by magician.md §9a) is
+the same information from a reachable source. The 12 type strings are kept anyway so spells
+1–4 stay authorable exactly as specced. Stat curves are linear per level in the module,
+anchored to the old 65-level rows. Level floor clamps at 1. **Untested in-game** (needs spells
+1–4 to exist, or a GM summon via one of the 43,660–43,671 ids) — the caster+5 overlevel check
+in *Watch for* is still open.
 
 | Tier | Pet level |
 |---|---|

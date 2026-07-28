@@ -6,7 +6,7 @@
 -- spells can be authored.
 --
 -- ID ranges claimed (docs/worlddungeon/F1-ID-RANGES.md):
---   npc_types.id  3,000,001-3,000,043   (the flat overflow band)
+--   npc_types.id  3,000,001-3,000,004   (the flat overflow band)
 --   pets.type     'WD<Element>Mk<N>'
 --
 -- WHY THE OVERFLOW BAND AND NOT zoneidnumber*1000+n. F1 keeps the zone-band
@@ -18,6 +18,32 @@
 --
 -- Idempotent: DELETE over the owned ranges, then INSERT.
 --
+-- ===================== ONE TEMPLATE PER ELEMENT ==============================
+--
+-- An earlier revision of this migration carried 12 templates (4 elements x
+-- Mk. I/II/III with pre-baked stats at 45/55/65). SUPERSEDED IN PLACE (the
+-- migration was never applied): pets now SCALE TO THE CASTER at spawn, so the
+-- template stops being a stat block and becomes a shape. The per-level numbers
+-- live in the shared spawn script:
+--
+--   server/quests/lua_modules/wd_servant.lua     (curves + scaling logic)
+--   server/quests/global/300000{1,2,3,4}.lua     (thin per-template wrappers)
+--
+-- On EVENT_SPAWN the script reads the summoning spell via GetPetSpellID()
+-- (set in the Pet constructor BEFORE AddNPC fires the event), derives the
+-- tier from the spell id, and sets level + hp/AC/damage explicitly:
+--
+--   Mk. I    caster level - 1   (floor 1)
+--   Mk. II   caster level + 3
+--   Mk. III  caster level + 5
+--
+-- Deliberately NOT pets.petpower = -1 native scaling: that raises level off
+-- the TEMPLATE's base, not the caster's, and caps at Pets:PetPowerLevelCap
+-- (10). Explicit Lua values keep one source of truth and remove the cap.
+--
+-- The template rows below are the level-65 shape per element. They matter in
+-- exactly two cases: a GM #spawn (no owner -> script leaves the template
+-- untouched), and any spawn path where the pet spell id is not one of ours.
 --
 -- ===================== MODELLED ON THE STOCK LADDER ==========================
 --
@@ -70,15 +96,15 @@
 -- caster servant, and Air becomes a lightning-proc striker instead. Worth
 -- reflecting back into the vault.
 --
--- Tiers track the summon spell's Mk. I/II/III at levels 45 / 55 / 65, with stats
--- interpolated from the stock R13 (45) and R16 (65) rows.
---
 -- ⚠️ BOTH SPELL COLUMNS ARE 0 ON EVERY TEMPLATE. The elemental identities do not
 -- exist yet: they need npc_spells_effects rows (passive/proc effects) authored
 -- against the SPAs in magician.md. These templates are correct CHASSIS with no
 -- abilities, so until that lands the four servants differ only in stats and
 -- will feel far more alike than the design intends. That is the next step.
 
+-- The DELETE ranges still cover the superseded 12-template claim
+-- (3,000,001-3,000,043) so a re-run cleans up a database that applied an
+-- intermediate state of this file (none should exist - it was never applied).
 DELETE FROM pets      WHERE type LIKE 'WD%Mk%';
 DELETE FROM npc_types WHERE id BETWEEN 3000001 AND 3000043;
 
@@ -88,43 +114,36 @@ INSERT INTO npc_types
    STR, STA, AGI, DEX, _INT, WIS, CHA, npc_spells_id, npc_faction_id, loottable_id, merchant_id)
 VALUES
   -- ===== Earth Guardian - Warrior chassis: most HP/AC, least damage =====
-  (3000001, 'Earth Guardian',   45, 75, 1, 24, 3400,   0, 2, 0, 5, 1.25, 205, 25, 25, 25,  25, 25, 30,  58, -1, 130,145,110,120,110,110,110, 0,0,0,0),
-  (3000002, 'Earth Guardian',   55, 75, 1, 24, 4600,   0, 2, 0, 6, 1.25, 245, 30, 30, 30,  30, 30, 34,  74, -1, 145,160,120,130,120,120,120, 0,0,0,0),
-  (3000003, 'Earth Guardian',   65, 75, 1, 24, 6200,   0, 2, 0, 7, 1.25, 287, 35, 35, 35,  35, 35, 38,  92, -1, 160,175,130,140,130,130,130, 0,0,0,0),
-
-  -- ===== Air Servant - Wizard chassis: caster, has mana, lowest HP =====
-  (3000011, 'Air Servant',      45, 75, 7, 24, 2100,   0, 2, 0, 5, 1.30, 205, 25, 25, 25,  25, 25, 26,  52, -1, 100,110,130,130,150,120,110, 0,0,0,0),
-  (3000012, 'Air Servant',      55, 75, 7, 24, 2800,   0, 2, 0, 6, 1.30, 245, 30, 30, 30,  30, 30, 30,  66, -1, 110,120,140,140,165,130,120, 0,0,0,0),
-  (3000013, 'Air Servant',      65, 75, 7, 24, 3700,   0, 2, 0, 7, 1.30, 287, 35, 35, 35,  35, 35, 34,  82, -1, 120,130,150,150,180,140,130, 0,0,0,0),
-
-  -- ===== Fire Servant - Monk chassis: fastest, highest damage, damage shield =====
-  (3000021, 'Fire Servant',     45, 75,16, 24, 2000,   0, 2, 0, 5, 1.40, 170, 25, 25, 25, 100, 25, 40,  78, -1, 125,120,145,140,110,110,110, 0,0,0,0),
-  (3000022, 'Fire Servant',     55, 75,16, 24, 2700,   0, 2, 0, 6, 1.40, 200, 30, 30, 30, 120, 30, 46, 104, -1, 140,130,155,150,120,120,120, 0,0,0,0),
-  (3000023, 'Fire Servant',     65, 75,16, 24, 3500,   0, 2, 0, 7, 1.40, 235, 35, 35, 35, 145, 35, 52, 132, -1, 155,140,165,160,130,130,130, 0,0,0,0),
-
-  -- ===== Water Servant - Rogue chassis: balanced support =====
-  (3000031, 'Water Servant',    45, 75, 4, 24, 2400,   0, 2, 0, 5, 1.28, 205, 25,100, 25,  25, 25, 32,  60, -1, 120,125,135,140,115,115,115, 0,0,0,0),
-  (3000032, 'Water Servant',    55, 75, 4, 24, 3200,   0, 2, 0, 6, 1.28, 245, 30,120, 30,  30, 30, 36,  78, -1, 130,135,145,150,125,125,125, 0,0,0,0),
-  (3000033, 'Water Servant',    65, 75, 4, 24, 4200,   0, 2, 0, 7, 1.28, 287, 35,145, 35,  35, 35, 40,  96, -1, 140,145,155,160,135,135,135, 0,0,0,0);
+  (3000001, 'Earth Guardian',   65, 75, 1, 24, 6200,   0, 2, 0, 7, 1.25, 287, 35, 35, 35,  35, 35, 38,  92, -1, 160,175,130,140,130,130,130, 0,0,0,0),
+  -- ===== Air Servant - Monk chassis: fastest, lightning-proc striker =====
+  (3000002, 'Air Servant',      65, 75, 7, 24, 3700,   0, 2, 0, 7, 1.30, 287, 35, 35, 35,  35, 35, 34,  82, -1, 120,130,150,150,180,140,130, 0,0,0,0),
+  -- ===== Fire Servant - Berserker chassis: highest damage, dies fast =====
+  (3000003, 'Fire Servant',     65, 75,16, 24, 3500,   0, 2, 0, 7, 1.40, 235, 35, 35, 35, 145, 35, 52, 132, -1, 155,140,165,160,130,130,130, 0,0,0,0),
+  -- ===== Water Servant - Ranger chassis: balanced support =====
+  (3000004, 'Water Servant',    65, 75, 4, 24, 4200,   0, 2, 0, 7, 1.28, 287, 35,145, 35,  35, 35, 40,  96, -1, 140,145,155,160,135,135,135, 0,0,0,0);
 
 -- pets rows: the `type` string is what SPA 33 on the summon spell references.
+-- All three tiers of an element point at the SAME template - the tier is not
+-- carried here (the spawn script derives it from the summoning spell id), but
+-- the three type strings are kept so the summon spells 1-4 stay authorable
+-- exactly as specced in magician.md (WDEarthMkI/II/III etc.).
 -- petcontrol 2 = fully commandable (matches stock SumAirR*), petnaming 3 =
 -- "<Owner>`s pet" naming, temp 0 = permanent.
 INSERT INTO pets (type, petpower, npcID, temp, petcontrol, petnaming, monsterflag, equipmentset)
 VALUES
   ('WDEarthMkI',   0, 3000001, 0, 2, 3, 0, -1),
-  ('WDEarthMkII',  0, 3000002, 0, 2, 3, 0, -1),
-  ('WDEarthMkIII', 0, 3000003, 0, 2, 3, 0, -1),
-  ('WDAirMkI',     0, 3000011, 0, 2, 3, 0, -1),
-  ('WDAirMkII',    0, 3000012, 0, 2, 3, 0, -1),
-  ('WDAirMkIII',   0, 3000013, 0, 2, 3, 0, -1),
-  ('WDFireMkI',    0, 3000021, 0, 2, 3, 0, -1),
-  ('WDFireMkII',   0, 3000022, 0, 2, 3, 0, -1),
-  ('WDFireMkIII',  0, 3000023, 0, 2, 3, 0, -1),
-  ('WDWaterMkI',   0, 3000031, 0, 2, 3, 0, -1),
-  ('WDWaterMkII',  0, 3000032, 0, 2, 3, 0, -1),
-  ('WDWaterMkIII', 0, 3000033, 0, 2, 3, 0, -1);
+  ('WDEarthMkII',  0, 3000001, 0, 2, 3, 0, -1),
+  ('WDEarthMkIII', 0, 3000001, 0, 2, 3, 0, -1),
+  ('WDAirMkI',     0, 3000002, 0, 2, 3, 0, -1),
+  ('WDAirMkII',    0, 3000002, 0, 2, 3, 0, -1),
+  ('WDAirMkIII',   0, 3000002, 0, 2, 3, 0, -1),
+  ('WDFireMkI',    0, 3000003, 0, 2, 3, 0, -1),
+  ('WDFireMkII',   0, 3000003, 0, 2, 3, 0, -1),
+  ('WDFireMkIII',  0, 3000003, 0, 2, 3, 0, -1),
+  ('WDWaterMkI',   0, 3000004, 0, 2, 3, 0, -1),
+  ('WDWaterMkII',  0, 3000004, 0, 2, 3, 0, -1),
+  ('WDWaterMkIII', 0, 3000004, 0, 2, 3, 0, -1);
 
--- Next: npc_spells lists giving each element its identity procs, then the
+-- Next: npc_spells_effects rows giving each element its identity, then the
 -- summon spells 1-4 (SPA 33 pointing at these `type` strings, plus SPA 167
 -- pet power rising per tier).

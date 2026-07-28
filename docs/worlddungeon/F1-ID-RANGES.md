@@ -160,7 +160,7 @@ below.
 
 | Range | Claimed by |
 |---|---|
-| 3,000,001–3,000,033 | Magician elemental servants, 4 elements × Mk. I/II/III (`0015`) |
+| 3,000,001–3,000,004 | Magician elemental servants, one template per element (`0015`) — tiers scale by Lua at spawn, so 3,000,005–3,000,033 from the earlier 12-template claim are freed back to the band |
 
 A summoned pet belongs to no zone, so the `zoneidnumber * 1000 + n` convention has no correct
 band to file it under. This is the canonical use of the escape hatch, not an exception to the
