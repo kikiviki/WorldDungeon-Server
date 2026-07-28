@@ -93,6 +93,8 @@ assignment here as it's taken so two work streams can't claim the same block.
 | `spells_new.id` | 101,000–101,999 | Monk (P1) | unclaimed |
 | `spells_new.id` | 102,000–102,999 | Wizard (P2 — reference detonation template) | unclaimed |
 | `items.id` | 1,000,000–1,000,999 | A4 tokens | unclaimed |
+| `items.id` | 1,001,000–1,001,006 | A13 T0 morphing weapon, seven forms (`0020`) | **claimed** |
+| `items.id` | 1,001,007–1,001,099 | later starter gear | reserved |
 | `aa_ability.id` | 100,000–100,999 | A2 Paragon paths | unclaimed |
 
 ---

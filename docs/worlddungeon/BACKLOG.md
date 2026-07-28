@@ -1079,8 +1079,18 @@ v1 wants 2–3 only: Fleer + Bloater + one Warded type.
 > **Landed 2026-07-28, live on the dev server, untested in-game:** migration **0016** (ogre
 > stun immunity off, tutorial disabled) and **0017** (Kerra Isle depop via content flag).
 > Engine change **W14** is deployed in the same binary. Test steps are in the vault:
-> *03 Code & Technical / In-Game Test Checklist*. Remaining: items 3 and 4 below
-> (combos, stats, entry point, starting gear) — migrations 0018–0021.
+> *03 Code & Technical / In-Game Test Checklist*.
+>
+> **Also landed 2026-07-28, applied + server restarted, untested in-game:** **0018** (256
+> all/all combos, deity Agnostic, start zone 74), **0019** (256 `start_zones` rows at
+> `player_choice = 74`, coords 0 → safe-point fallback), **0020** (the seven A13 T0 morphing
+> weapon forms, items 1,001,000–1,001,006), **0021** (stock kits content-flagged off;
+> universal kit = Bread Cakes*, Water Flask, class-form T0 weapon equipped in primary).
+> Quests repo: `global/items/script_1001000.lua` (form cycling, 2H-with-offhand blocked),
+> `lua_modules/wd_newbie.lua` + `global_player.lua` hook (weapon skills floored to 10,
+> Meditate floored to 30 for the 11 meditating classes). **Remaining:** A12 stat flattening,
+> Titanium→qcat routing, and the in-game creation test (RoF2 client: create any off-combo,
+> land on Kerra Isle, cycle the weapon).
 
 Any race may be any class; racial combat traits removed; no starting gear; everyone lands in
 one controlled entry point. Four separable pieces — the first is nearly free, the last is the
