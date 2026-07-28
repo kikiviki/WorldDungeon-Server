@@ -156,6 +156,16 @@ below.
 |---|---|---|---|
 | _(fill in as A7 allocates zones)_ | | | |
 
+**Overflow band claims** (`3,000,000+`) — for NPCs that genuinely have no zone:
+
+| Range | Claimed by |
+|---|---|
+| 3,000,001–3,000,033 | Magician elemental servants, 4 elements × Mk. I/II/III (`0015`) |
+
+A summoned pet belongs to no zone, so the `zoneidnumber * 1000 + n` convention has no correct
+band to file it under. This is the canonical use of the escape hatch, not an exception to the
+rule.
+
 ---
 
 ## `zone.zoneidnumber` — 999 is convention, not a hard ceiling

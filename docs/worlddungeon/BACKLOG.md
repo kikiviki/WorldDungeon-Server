@@ -205,11 +205,23 @@ focus path) is **independent of the defect** and is the one genuinely open quest
    - ✅ §9f bolt and rain (spells 18–22) authored as
      [`0014`](../../worlddungeon/migrations/0014_magician_bolt_and_rain.sql) — 15 rows, caps
      reachable from the start, SQL-validated in scratch.
-   - 🔴 **Prerequisite for the class core:** spells 1–4, the four elemental servants, carry their
-     identity on **`npc_types` templates plus `pets` rows that do not exist**. Authoring the
-     summon spells first would produce SPA 33 rows pointing at nothing. That is a per-zone
-     `npc_types` band claim under F1 and needs its own migration **before** the Magician's core
-     can be built.
+   - ✅ **Servant templates built** —
+     [`0015`](../../worlddungeon/migrations/0015_magician_servant_templates.sql): 12 `npc_types`
+     rows + 12 `pets` rows in the `3,000,000+` overflow band (a pet has no zone, so the
+     `zone*1000+n` convention cannot apply — this is the canonical use of F1's escape hatch).
+     **Chassis by class:** Earth = Warrior, Air = Monk, **Fire = Berserker** (*all gas no
+     brakes* — top damage, lowest AC/HP), **Water = Ranger** (deliberately not Rogue, to keep
+     off the Rogue's backstab fantasy).
+   - 🔴 **Decided: pets never cast on their own.** `npc_spells_id = 0` on every template.
+     Identity is delivered via **procs and `npc_spells_effects_id` passive effects**, which
+     involve no AI decision. **This changes the design** — magician.md §9a calls Air "the caster
+     servant", and under this decision there is no caster servant; Air becomes a lightning-proc
+     striker. *Reflect back into the vault.*
+   - ⏳ **Next:** `npc_spells_effects` rows giving each element its identity (Fire's damage
+     shield, Water's group heal-on-hit, Earth's mitigation ward, Air's lightning procs). Until
+     those land the four servants differ only in stats and will feel far more alike than
+     intended. Then spells 1–4 (SPA 33 → the `WD<Element>Mk<N>` type strings, SPA 167 pet power
+     rising per tier).
    - ⏳ Spells 6, 7, 11–17 carry unresolved ⚠️ (AEMelee shape, pet avoidance SPA, non-caster aura
      anchoring, the familiar graft mechanism) — source verification needed.
    - ⏳ Spells 23–27 summon **items** and need ids from the 1,000,000+ band.
