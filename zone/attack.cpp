@@ -868,6 +868,11 @@ int Mob::GetClassRaceACBonus()
 			ac_bonus = (level_scaler * 5) / 4;
 		if (ac_bonus > 12)
 			ac_bonus = 12;
+		// WD: stock clamps only the ceiling. level_scaler is (level - 26), so
+		// every Rogue below level 26 gets a NEGATIVE AC bonus - a level 1 Rogue
+		// loses 6 AC. Floor it at 0.
+		if (ac_bonus < 0)
+			ac_bonus = 0;
 	}
 
 	if (GetClass() == Class::Beastlord) {
@@ -884,6 +889,10 @@ int Mob::GetClassRaceACBonus()
 			ac_bonus = (level_scaler * 5) / 5;
 		if (ac_bonus > 16)
 			ac_bonus = 16;
+		// WD: same ceiling-only clamp as the Rogue block above. level_scaler is
+		// (level - 6), so Beastlords below level 6 get a negative AC bonus.
+		if (ac_bonus < 0)
+			ac_bonus = 0;
 	}
 
 	if (GetRace() == Race::Iksar)
@@ -1671,10 +1680,16 @@ bool Mob::Attack(Mob* other, int Hand, bool bRiposte, bool IsStrikethrough, bool
 
 		int ucDamageBonus = 0;
 
-		if (Hand == EQ::invslot::slotPrimary && GetLevel() >= 28 && IsWarriorClass())
+		if (Hand == EQ::invslot::slotPrimary && IsWarriorClass())
 		{
-			// Damage bonuses apply only to hits from the main hand (Hand == MainPrimary) by characters level 28 and above
-			// who belong to a melee class. If we're here, then all of these conditions apply.
+			// Damage bonuses apply to hits from the main hand (Hand == MainPrimary) by melee classes.
+			//
+			// WD: the stock condition also required GetLevel() >= 28. Removed so a
+			// 2H feels weighty from level 1 rather than only from T4 onward
+			// (backlog A13). That gate was load-bearing for a reason the comment
+			// did not state - it hid an unsigned underflow in
+			// GetWeaponDamageBonus() below level 28 - so the clamps added there
+			// are a prerequisite for this line, not a tidy-up.
 
 			ucDamageBonus = GetWeaponDamageBonus(weapon ? weapon->GetItem() : (const EQ::ItemData*) nullptr);
 
@@ -3414,8 +3429,18 @@ uint8 Mob::GetWeaponDamageBonus(const EQ::ItemData *weapon, bool offhand)
 	// calling for offhand DB
 	auto level = GetLevel();
 
+	// WD: this function returns uint8, but every formula below is built around
+	// (level - 28) / 3, which is NEGATIVE below level 28. Stock code never hit
+	// that because the only caller gated on GetLevel() >= 28; we removed that
+	// gate so 2H feels weighty from level 1 (backlog A13). Without these clamps
+	// a level 1 character underflows the uint8 return and lands on ~248 bonus
+	// damage. Clamped at 0, sub-28 characters get the base term plus any
+	// delay bonus, which is exactly the intent.
+	const int level_term    = std::max(0, (static_cast<int>(level) - 28) / 3);
+	const int level_term_40 = std::max(0, (static_cast<int>(level) - 40) / 3);
+
 	if (!weapon) {
-		return 1 + ((level - 28) / 3); // how does weaponless scale?
+		return 1 + level_term; // how does weaponless scale?
 	}
 
 	auto delay = weapon->Delay;
@@ -3423,30 +3448,30 @@ uint8 Mob::GetWeaponDamageBonus(const EQ::ItemData *weapon, bool offhand)
 		// we assume sinister strikes is checked before calling here
 		if (!offhand) {
 			if (delay <= 39) {
-				return 1 + ((level - 28) / 3);
+				return 1 + level_term;
 			} else if (delay < 43) {
-				return 2 + ((level - 28) / 3) + ((delay - 40) / 3);
+				return 2 + level_term + ((delay - 40) / 3);
 			} else if (delay < 45) {
-				return 3 + ((level - 28) / 3) + ((delay - 40) / 3);
+				return 3 + level_term + ((delay - 40) / 3);
 			} else if (delay >= 45) {
-				return 4 + ((level - 28) / 3) + ((delay - 40) / 3);
+				return 4 + level_term + ((delay - 40) / 3);
 			}
 		} else {
 			if (RuleB(Skills, UseAltSinisterStrikeFormula)) {
 				if (delay <= 19) {
-					return 5 + ((level - 40) / 3) * (delay / 30);
+					return 5 + level_term_40 * (delay / 30);
 				} else if (delay <= 23) {
-					return 6 + ((level - 40) / 3) * (delay / 30);
+					return 6 + level_term_40 * (delay / 30);
 				} else if (delay >= 24) {
-					return 7 + ((level - 40) / 3) * (delay / 30);
+					return 7 + level_term_40 * (delay / 30);
 				}
 			} else {
-				return 1 + ((level - 40) / 3) * (delay / 30); // YOOO shit's useless waste of AAs
+				return 1 + level_term_40 * (delay / 30); // YOOO shit's useless waste of AAs
 			}
 		}
 	} else {
 		// 2h damage bonus
-		int64 damage_bonus = 1 + (level - 28) / 3;
+		int64 damage_bonus = 1 + level_term;
 
 		if (delay <= 27) {
 			return damage_bonus + 1;

@@ -697,6 +697,45 @@ Full analysis in [P1-STACKING-DEFECT.md](P1-STACKING-DEFECT.md).
 buff — matrix step 3, with `share WorldDungeon exclusivity group [500001], overwriting` in the
 zone log.
 
+### W14 — Damage bonus below 28 + low-level combat clamps · **S** · ✅ **built, compiles — untested in-game** · *no dependencies*
+
+**Unblocks:** A13 — 2H feels weighty from level 1 instead of only from ~T4.
+
+Removed the `GetLevel() >= 28` gate on the weapon damage bonus (`zone/attack.cpp:1674`).
+
+🔴 **That gate was hiding an unsigned underflow, not expressing a design rule.**
+`Mob::GetWeaponDamageBonus()` returns **`uint8`**, but every formula in it is built on
+`(level - 28) / 3`, which is negative below 28. Removing the gate alone would have given a
+level 1 character **+248 min damage** (2H at delay 45: **+252**). Measured before the change:
+
+| Level | 1H raw → as uint8 | 2H (d45) raw → as uint8 |
+|---|---|---|
+| 1 | −8 → **248** | −4 → **252** |
+| 13 | −4 → **252** | 0 → 0 |
+| 25 | 0 → 0 | 4 → 4 |
+
+Fix: clamp the level terms at 0 (`level_term`, `level_term_40`) before they reach the `uint8`
+return. Sub-28 characters now get the base term plus any delay bonus — 1H `+1`, 2H at delay 45
+`+5` — which is the intent, and the ≥28 curve is bit-identical to stock.
+
+**Two latent defects found in the same audit, both fixed.** The Rogue and Beastlord AC bonuses
+(`zone/attack.cpp:857`, `:873`) clamp only the *ceiling*:
+
+- Rogue `level_scaler = level - 26` → every Rogue **below level 26 has negative AC bonus**; a
+  level 1 Rogue loses **6 AC**.
+- Beastlord `level_scaler = level - 6` → same below level 6.
+
+Both now floored at 0. Independent of A13 — they are stock bugs that only show at low level,
+which is exactly the band A11 puts every new character into.
+
+Audit cleared as safe: `attack.cpp:5868` (`which[level - 50]`, guarded by `level < 51`),
+`GetMobFixedOffenseSkill()` (clamped), `mob.cpp:5265` (guarded by `level > 50`),
+`mob.cpp:5471` (already `std::max(0, …)`). Monk special-attack level tiers
+(`special_attacks.cpp:1929-1941`, `:2076-2092`) are intentional progression, not clamps.
+
+**Untested in-game.** Verify at level 1 that a 2H shows a small positive bonus and nothing
+resembling 248, and that a level 1 Rogue's AC is not lower than a level 1 Warrior's.
+
 ### W2 — Ally-target expansion (primer P3.6) · **S** · open · *no dependencies*
 
 **Unblocks:** Warrior, Cleric, Bard, Shaman, Paladin — *and the entire solo-first premise (D1)*
