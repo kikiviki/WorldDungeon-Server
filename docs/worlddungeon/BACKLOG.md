@@ -640,6 +640,44 @@ What was actually run:
 
 ---
 
+### F5 — Zone conversion and mob scaling convention · **M** · decided, not yet built · *depends: F1, F2*
+
+Full design: **[ZONE-AND-MOB-SCALING.md](ZONE-AND-MOB-SCALING.md)**. Summary of what is decided:
+
+**📏 A zone covers 3–4 levels.** The headline rule, and the one everything else serves. It is
+the con table's number, not a preference: with `UseOldConSystem` false, `+1..+3` is yellow and
+**`+4` is red** (`zone/mob_ai.cpp:2156`). A zone spanning more than 3 levels above its entry
+level contains mobs its own intended player cannot fight — the "cleared 1–4, stuck on 5–10"
+failure. So **a tier is two or three zones, never one**, and a zone's useful life ends ~6 levels
+above its floor where cons go gray and stop paying experience.
+
+Tiers need no schema support: at a level 100 cap with 10-level tiers, `tier = ceil(level / 10)`.
+
+**⚠️ Level is a property of place, never of chance.** `NPC::LevelScale()` re-rolls
+`random.Int(level, maxlevel)` in the **NPC constructor**, so a level range re-rolls on every
+respawn — a level 1 gnoll can return at level 10 with no visual difference. Every WD npc_types
+row sets `maxlevel = 0` or `= level`. Variety comes from `spawnentry.chance` weighting between
+distinct fixed-level rows, which the player can actually see.
+
+**Zone swap: one flag, both columns.** Stock spawns get `content_flags_disabled = wd_<zone>`,
+WD mirrors get `content_flags = wd_<zone>`. One flag flips a zone atomically, nothing is
+deleted, and mirrors reuse the stock `spawn2.pathgrid` rather than copying paths. Kerra Isle
+currently uses the opposite polarity and should migrate onto this.
+
+**Scaling hooks the existing engine system** — `npc_scale_global_base`, keyed
+`(type, level, zone_id_list, instance_version_list)`. DB owns the curve; Lua `EVENT_SPAWN` owns
+jitter via `npc:ScaleNPC(level)`.
+
+Three traps recorded in the doc: scale `type` is **inferred from name capitalization**, not
+assignable; auto-scale is all-or-nothing so it must be driven explicitly from Lua; and the scale
+table **stops at level 90**, needing 30 rows for 91–100. There is also no live reload for
+scaling — curve changes cost a zone restart.
+
+Ships with two pre-flight SQL checks (level histogram, and zero `maxlevel > level` rows) that
+gate turning a zone's flag on.
+
+---
+
 ## Stage 1 — Zero-dependency engine primitives · Track B
 
 All three are **S**, mutually independent, and unblock more than anything else on the board.
