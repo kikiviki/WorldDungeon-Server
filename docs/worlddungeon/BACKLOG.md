@@ -185,9 +185,13 @@ focus path) is **independent of the defect** and is the one genuinely open quest
    unapplied behind the `0004` gate. `0007`'s test matrix **is** W1's done-when check.
    **Deferred:** Thermal Shock 15 + Cascade 16 (W1 extension), mana ward 17–19 (W4 pkg),
    black hole 20–23, Careful Caster 28, ports 29–30, Sculpt→AE-lure gate.
-2. **Cleric smite + recourse, HP buffs, worship lines, health balance** — remembering SPA 153's
+2. **Passive heal-potency AA line** — the bulk of the Cleric's heal curve (~115% of SPA 125
+   across its ranks). AA rank effects carry SPA 125 natively (`zone/bonuses.cpp:4126`) and land
+   in `realTotal3`, which **sums** with the mantle and with gear. Authoring it in AA rather than
+   in the mantle keeps Mk. I relevant and stops a large mantle value masking gear focus.
+3. **Cleric smite + recourse, HP buffs, worship lines, health balance** — remembering SPA 153's
    **inverted sign** (positive base = penalty).
-3. **Monk pools** — offense then defense. Each stance needs its **own proc** (decided), and each
+4. **Monk pools** — offense then defense. Each stance needs its **own proc** (decided), and each
    pool needs its shared layout budgeted *before* any of it is authored.
 
 ### Open items carried forward
@@ -197,7 +201,8 @@ focus path) is **independent of the defect** and is the one genuinely open quest
 | **`not_focusable` column unidentified** | The spdat struct calls it field 197 but ordinal 198 here is `not_extendable`. Left unset — default 0 is what we want — but **find it before authoring any non-focusable spell.** |
 | GCD / recast on same-layout overwrite | Decides how fluid stance swapping feels. Unverified. |
 | Recourse behaviour on partial resist | Cleric smite. Unverified. |
-| Focus effects select one best/worst, they don't sum | So Zealot's negative SPA 125 and a heal-focus AA will **not** simply add. Needs a design pass before mantle numbers are final. |
+| ~~Focus effects select one best/worst, they don't sum~~ | ✅ **WRONG — corrected.** `GetFocusEffect` returns `realTotal + realTotal2 + realTotal3 + worneffect_bonus` (`zone/spell_effects.cpp:6886`): **item, spell/buff and AA sources SUM.** "Best wins" applies only *within* a source. Mantle + gear + AA all stack. |
+| **Passive heal-potency AA line not authored** | Carries ~115% of the Standard Mantle's ~150% target curve. Until it exists the Cleric tops out near +35%, so step 6 will show a real but modest gain — expected, not a failure. See migration `0011`. |
 | Darkvision SPA (Badger) | Low priority. |
 | Weapon types vs. §2.1 | Design question, not source. |
 
