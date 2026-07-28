@@ -162,6 +162,64 @@ percentage stacking with uncapped gear focus has no natural brake.
 >
 > **Budget Hummingbird's three tiers inside 0–25.** Suggest 10 / 18 / 25.
 
+### 3a. The four melee haste varieties
+
+`Client::CalcHaste()`, `zone/client_mods.cpp:927-1000`. They are **separate accumulators with
+separate caps**, not one pool:
+
+| SPA | Bonus field | Cap | Notes |
+|---:|---|---|---|
+| **11** `AttackSpeed` | `spellbonuses.haste` | the main cap | spell haste; **negative = slow** |
+| **98** `AttackSpeed2` | `hastetype2` | **10%**, and **level 50+ only** | below 50 it does nothing at all |
+| **119** `AttackSpeed3` | `hastetype3` | `Hastev3Cap` **25** at 51+; **10** at 1–50 | **overhaste** — see below |
+| *(worn)* | `itembonuses.haste` | **10%** at 1–25; uncapped at 26+ | gear haste |
+| **371** `AttackSpeed4` | `inhibitmelee` | — | a stackable **slow**, subtracted from SPA 11 |
+
+**The main cap is level-based, not flat:**
+
+| Level | Main cap |
+|---|---:|
+| 1–50 | `level + 25` |
+| 51–59 | 85 |
+| 60+ | `HasteCap` = **100** |
+
+`Character:IgnoreLevelBasedHasteCaps` (currently **false**) bypasses all the level gating.
+
+> 🔑 **Overhaste is added *after* the main cap** — that is what makes it "over" haste:
+> ```cpp
+> if (h > cap) { h = cap; }          // main cap applied first
+> ...
+> h += spellbonuses.hastetype3;      // type 3 stacks ON TOP, up to Hastev3Cap
+> Haste = 100 + h;
+> ```
+> So the ceiling at level 65 is **100 + 25 = 125**, i.e. `Haste = 225` (2.25× swing rate).
+> Hummingbird's 25% is therefore genuinely additive on top of a fully-hasted character, not
+> competing with gear haste for the same 100 — which makes it a much stronger stance than the
+> raw number suggests.
+
+### 3b. Attack delay floor — yes, `Combat:MinHastedDelay` = 400
+
+`Mob::SetAttackTimer()`, `zone/attack.cpp:6686-6707`:
+
+```cpp
+int delay = 100 * ItemToUse->Delay;      // or 100 * GetHandToHandDelay()
+speed = delay / haste_mod;               // haste_mod = GetHaste() * 0.01
+...                                      // HundredHands reduces speed further
+TimerToUse->SetAtTrigger(std::max(RuleI(Combat, MinHastedDelay), speed), ...);
+```
+
+**A rule, so server-side changeable** like the others. Related: `Combat:QuiverHasteCap` = 1000,
+a separate floor for bows.
+
+**In practice it rarely binds.** Units are `100 × weapon delay`, so at the level-65 ceiling of
+`Haste = 225` a weapon needs **delay ≤ 9** to reach the 400 floor — most weapons are 18–30.
+
+> ⚠️ **The exception is the Monk.** `GetHandToHandDelay()` is low by class design, and
+> `HundredHands` reduces `speed` further *before* the clamp. A high-level Monk under Hummingbird
+> with H2H haste gear is the one build that can actually hit this floor — at which point further
+> haste does **nothing**. Worth checking against real numbers before tuning Hummingbird's tiers
+> toward the 25% ceiling.
+
 ---
 
 ## 4. Level-scaling formulas — the reachability rule
