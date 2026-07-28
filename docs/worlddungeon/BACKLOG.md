@@ -1160,7 +1160,7 @@ Proposed: RoF2 → Kerra Isle (`kerraridge`, 405, -265, -5). Everything else →
 - **No starting gear + no starting zone gear source** means a naked level 1 with no weapon.
   Confirm the first-hour path exists before clearing `starting_items`.
 
-### A12 — Flatten racial stats and universal darkvision · **M** · *stats applied (0023), darkvision open* · *pairs with A11*
+### A12 — Flatten racial stats and universal darkvision · **M** · ✅ **done** · *pairs with A11*
 
 > **Stats: done, migration `0023_flatten_racial_base_stats`.** All 109
 > `char_create_point_allocations` rows total exactly 560 with every attribute inside 65–95.
@@ -1175,8 +1175,13 @@ Proposed: RoF2 → Kerra Isle (`kerraridge`, 405, -265, -5). Everything else →
 > footing this item is actually about. The ±15 bound below applies to the **base row**, not to
 > the delivered character — the In-Game Test Checklist was reworded to match.
 >
-> **Darkvision is still open** — neither route below has been built, and the choice between
-> them is still undecided.
+> **Darkvision: done, route 1.** `Client::InitInnates()` sets `InnateUltraVision` for every
+> race, placed after the race switch so it overrides both the switch and the
+> `race >= Race::Froglok2` block above it. `InnateInfravision` is cleared rather than left set
+> alongside, because no stock race sets both and that combination has never shipped to a
+> client. Route 2 (SPA 65/66) was rejected: it would occupy a buff slot and be dispellable,
+> whereas `InitInnates` re-runs on illusions, mounts and vision-buff removal and so self-heals.
+> Needs a zone binary — restart, not reload.
 
 **Decided: baseline 80 per attribute, total 560, ±15 from baseline.** A race's flagship
 attribute may reach 95 (+15) and must be paid for by −15 spread across its others, so every
