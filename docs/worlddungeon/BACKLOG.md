@@ -1086,12 +1086,73 @@ Proposed: RoF2 → Kerra Isle (`kerraridge`, 405, -265, -5). Everything else →
 
 **Open questions before building:**
 
-- **Kerra Isle is not safe as-is** — it has live kerran NPCs that will kill a naked level 1.
-  Needs a depop, a safe sub-area, or a different zone.
+- ~~Kerra Isle safety~~ — **decided:** NPCs will be removed, making it a true safe zone.
 - **Verify both coordinates in-game.** The qcat "white room" box in particular — confirm it is
   inside geometry and has no fall-through, on *each* client to be supported.
 - **No starting gear + no starting zone gear source** means a naked level 1 with no weapon.
   Confirm the first-hour path exists before clearing `starting_items`.
+
+### A12 — Flatten racial stats and universal darkvision · **M** · open · *pairs with A11*
+
+**Equal totals, ±15 swing.** `char_create_point_allocations` (109 rows), columns
+`base_str…base_cha` + `alloc_*`. Current base totals run **545–586 across 19 distinct totals**
+— races are not on equal footing today. Flattening means rewriting this table so every
+allocation sums to one chosen total, with no attribute more than +15 off the flat baseline.
+
+Worked example at a 560 total (7 × 80 baseline): a race's primary at 95 (+15) must be paid for
+by −15 spread across the rest. Note the table is keyed per race **and** class
+(`char_create_combinations.allocation_id` → here), so "per race" flattening means collapsing
+many allocation rows to one per race — likely far fewer than 109.
+
+🔴 Same Titanium caveat as A11: `CheckCharCreateInfoTitanium()` (`world/client.cpp:2002`)
+validates against a **hardcoded `BaseRace[16][7]` C++ matrix** that ignores this table. RoF2
+reads the table; Titanium does not.
+
+**Darkvision for all races — yes, doable, server-side.** Two routes:
+
+1. **`Client::InitInnates()` (`zone/client.cpp:9565`)** — a per-race switch setting
+   `m_pp.InnateSkills[InnateUltraVision | InnateInfravision]`. Enabling ultravision for all
+   races is a small edit here. It re-runs on illusions, mounts, and vision-buff removal, so it
+   self-heals. **Preferred** — it is the actual innate, not a buff.
+2. **SPA 65 `InfraVision` / SPA 66 `UltraVision`** (`common/spdat.h:1156-1157`, both implemented)
+   as a permanent buff or worn item effect. No C++, but consumes a buff slot and can be dispelled.
+
+Decide which. Route 1 is the honest implementation; route 2 ships without a recompile.
+
+### A13 — Morphing newbie weapon · **M** · open · *depends: A11*
+
+One all/all newbie weapon the player right-clicks to cycle through all seven weapon skills.
+
+**Seven items, not one.** `itemtype` is static item data in shared memory — there is no
+per-instance override — so this is 7 item ids plus a swap script, not one mutating item. Values
+from `common/item_data.h:54`:
+
+| Type | `itemtype` |
+|---|---|
+| 1HS | 0 |
+| 2HS | 1 |
+| 1HP | 2 |
+| 1HB | 3 |
+| 2HB | 4 |
+| 2HP | **35** |
+| Martial (h2h) | **45** |
+
+Note 2HP and Martial are *not* contiguous with the rest — 35 and 45.
+
+**Hook:** `EVENT_ITEM_CLICK` exists in both parsers (`zone/embparser.cpp:115`). No custom spell
+is required — click straight into script, delete, and summon the next id. A click *effect*
+spell is only needed if the cycle should also be castable.
+
+**Gotchas to design around:**
+
+- **Equipped 2H vs. shield.** Cycling 1H → 2H while a secondary is equipped must be blocked or
+  must auto-unequip. This is the most likely live bug.
+- **Give all 7 the same `loregroup`**, not just LORE individually, or a player can hold seven.
+- **Do not set NORENT** — the weapon would vanish while logged off. NODROP + LORE + loregroup
+  is the combination that matches the intent.
+- Swap must handle the item being **equipped vs. in a bag**, and preserve the slot.
+- Skill-ups do not transfer between weapon skills; cycling resets practical damage until that
+  skill catches up. Intended, but call it out to players.
 
 ### G1 — Fork akk-stack · **S** · open · **before go-live**
 
