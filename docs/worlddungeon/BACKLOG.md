@@ -203,6 +203,19 @@ focus path) is **independent of the defect** and is the one genuinely open quest
 5. **Monk pools** — offense then defense. Each stance needs its **own proc** (decided), and each
    pool needs its shared layout budgeted *before* any of it is authored.
 
+### 🔴 Retune the unapplied migrations against [ENGINE-CAPS.md](ENGINE-CAPS.md)
+
+A caps audit found **59 inert `max` values** across `0005`/`0006`/`0007`/`0009` — caps set above
+what level 65 can reach, so they never bind. **All three Meteor tiers deliver identical damage at
+65**, as do Asteroid, both Burst lines, both Shower lines and the Lures. The Wizard's tier system
+currently does nothing on its headline nukes.
+
+Also unchecked and cap-bound: **SPA 119 overhaste is capped at 25%** (`Hastev3Cap`), which binds
+the Monk's Hummingbird stance, and **cast haste is capped at 50% on the summed total**, of which
+the Standard Mantle Mk. III already spends 15.
+
+**Do this before `wd-migrate up` releases the queue.**
+
 ### Open items carried forward
 
 | Item | Note |
