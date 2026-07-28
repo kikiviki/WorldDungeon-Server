@@ -10,6 +10,9 @@
 #
 #   wd-migrate status              show applied / pending / drifted
 #   wd-migrate up [--dry-run]      apply all pending migrations, in order
+#   wd-migrate up --only <version> apply exactly one pending migration. For a
+#                                  schema fix that must land ahead of content
+#                                  queued behind an unrelated gate.
 #   wd-migrate verify              re-check checksums of applied migrations
 #   wd-migrate new <name>          scaffold the next migration file
 #
@@ -136,8 +139,17 @@ cmd_verify() {
 }
 
 cmd_up() {
-  local dry_run=0
-  [[ "${1:-}" == "--dry-run" ]] && dry_run=1
+  local dry_run=0 only=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run) dry_run=1; shift ;;
+      --only)    only="${2:-}"; shift 2 ;;
+      *)         echo "unknown argument: $1" >&2; return 1 ;;
+    esac
+  done
+  if [[ -n "$only" ]] && ! migration_files | grep -q "/${only}_"; then
+    echo "no migration with version '$only'" >&2; return 1
+  fi
 
   ensure_tracking_table
 
@@ -158,6 +170,10 @@ cmd_up() {
     if printf '%s\n' "$applied" | awk -v v="$v" -F'\t' '$1==v {found=1} END{exit !found}'; then
       continue
     fi
+    # --only applies exactly one pending migration, leaving earlier ones queued.
+    # Needed when a schema fix must land ahead of content that is gated on
+    # something else - see 0010.
+    [[ -n "$only" && "$v" != "$only" ]] && continue
 
     count=$((count+1))
     if [[ $dry_run -eq 1 ]]; then

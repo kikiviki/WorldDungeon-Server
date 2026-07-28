@@ -44,6 +44,7 @@ Status: `open` · `in-progress` · `blocked` · `done`
 | ✅ **Caster spell design docs** | All eleven caster classes designed in [spells/](spells/) — 330 spells, id bands, spellgroups, engine deps per class. Cleric picked as first implementation per the README's review order. |
 | 🔧 **First engine code** | ✅ **W1 built and compiled** — `IS_TARGET_HAS_WD_SPELLGROUP = 60000` (F1's id 1000 collided with stock; corrected). Untested in-game; see W1. |
 | 🔧 **W13 stance exclusivity** | ✅ **built and deployed.** `WD_EXCLUSIVE_SPELLGROUP_BASE = 500000` + one check in `Mob::CheckStackConflict()`. Replaces the matching-layout model, which could not work. See [P1-STACKING-DEFECT.md](P1-STACKING-DEFECT.md). |
+| ✅ **Spell pipeline hardened** | Migration `0010` — the eight loader-read text columns are now `NOT NULL DEFAULT ''`, so the NULL defect cannot recur and the four gated migrations need no amendment. `wd-migrate up --only <version>` added for schema fixes that must land ahead of gated content. |
 | ✅ **Spell pipeline unblocked** | Migration `0008`. `shared_memory` had been aborting on a NULL varchar since the first custom row existed, so **no custom spell had ever reached a zone**. Now `Loaded [40,734]` = stock + 12. |
 
 **`feature/foundations` is merged and done** (PR #1). Delivered: **F1 ✅ · F2 ✅ · F3 ✅ · F4 ✅ ·
@@ -89,9 +90,22 @@ which is why upstream has never hit this. The query is `ORDER BY id ASC`, so it 
 custom row (42700) — presenting exactly as "all stock spells work, no custom spell exists."
 
 Fixed by [`0008_spell_text_nulls.sql`](../../worlddungeon/migrations/0008_spell_text_nulls.sql)
-(applied). **Standing rule: every `spells_new` INSERT must name all six text columns explicitly,
-even when the value is `''`.** `0005`/`0006`/`0007` still need amending to do so before they are
-applied — `0006` names them for the familiars only.
+(applied), and then made **structurally impossible** by
+[`0010_spell_text_not_null.sql`](../../worlddungeon/migrations/0010_spell_text_not_null.sql)
+(applied) — see below.
+
+> ✅ **The standing rule is retired.** `0010` sets all eight columns `NOT NULL DEFAULT ''`, so an
+> INSERT that simply omits them gets a loader-safe value and an INSERT that passes `NULL` now
+> **fails loudly at migration time** instead of silently killing the loader. **`0005`/`0006`/
+> `0007`/`0009` therefore need no amendment.**
+>
+> ⚠️ **It is eight columns, not six.** `name` (row[1]) and `player_1` (row[2]) are copied by the
+> same unguarded loop and are equally nullable — they had not bitten us only because our
+> migrations happen to set `name`, and `0008` set `player_1`. Any earlier reference to "six" in
+> this file or in `0008` is undercounting.
+>
+> Verified: constraint rejects an explicit NULL, an omitted column resolves to `''`, and
+> `shared_memory` regenerates clean (46 MB spells file, zero errors).
 
 Also worth knowing: **`~/server/bin` has no `shared_memory` symlink** (only `zone` and `world` are
 linked), so the regeneration step has no tool wired up in the server dir. Run the build output:
