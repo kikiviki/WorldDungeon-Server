@@ -1035,6 +1035,75 @@ Needs the EQEmu Recommended-Level formula verified in source (vault *Open Decisi
 
 v1 wants 2–3 only: Fleer + Bloater + one Warded type.
 
+### A11 — Open character creation · **M** · open · *no dependencies*
+
+Any race may be any class; racial combat traits removed; no starting gear; everyone lands in
+one controlled entry point. Four separable pieces — the first is nearly free, the last is the
+real work.
+
+**1. Ogre frontal stun immunity — rule only, no C++.** Already rule-driven at
+`zone/attack.cpp:4338`:
+
+| Rule | Default | Set to |
+|---|---|---|
+| `Combat:FrontalStunImmunityRaces` | `512` (Ogre bit) | `0` |
+| `Combat:FrontalStunImmunityClasses` | `0` | leave |
+
+`Race::OggokCitizen` is OR'd in unconditionally and is *not* rule-gated, but it is an NPC race
+— irrelevant unless a player is ever given it.
+
+**2. Other racial traits are NOT rule-driven.** Base resists are hardcoded per-race switches
+in `zone/client_mods.cpp` — `CalcMR()` 1006, `CalcFR()` 1080, `CalcDR()` 1166, `CalcPR()` 1258
+(e.g. Dwarf MR 30 vs everyone else's 25). Racial stat spreads live in
+`char_create_point_allocations` (109 rows). **Decide explicitly how far "remove racial traits"
+goes** — stun immunity alone is free; full racial parity is a C++ change plus a data pass, and
+flattening stat spreads removes most of what race *means* mechanically.
+
+**3. All race/class combos — data, but client-gated.** `char_create_combinations`, 641 rows,
+PK `(race, class, deity, start_zone)`. Loaded to memory and **sent to the client** for SoF+
+(`world/client.cpp:698` `HandleCharacterCreateRequestPacket`), then re-validated server-side by
+`CheckCharCreateInfoSoF()` (1901).
+
+🔴 **Titanium does not use this table.** `CheckCharCreateInfoTitanium()` (2002) validates
+against a hardcoded 16-race C++ matrix, and the Titanium client hardcodes its own creation UI.
+**Opening combos works on RoF2 and will not work on Titanium without a client-side change.**
+This *supports* the RoF2-only direction in item 4 — but confirm it before authoring, because it
+decides whether Titanium is supported at all.
+
+Cross product is 16×16×17×26 = ~113k rows. Collapsing to one start zone and a sane deity list
+per class is what makes this tractable; don't generate the full product.
+
+**4. Single entry point.** Starting gear: `starting_items` (148 rows) — clear via migration.
+Start zone: `start_zones` (411 rows).
+
+Client-version-dependent start zone is **not natively supported** — char creation has no view
+of client version. Do it on first zone-in instead: set one start zone for everyone, then a
+`global_player` script branches on `$client->ClientVersion()` and `MovePC()`s RoF2 clients out
+to the real start, gated on a first-login qglobal (A1 schema).
+
+Proposed: RoF2 → Kerra Isle (`kerraridge`, 405, -265, -5). Everything else → `qcat` white room
+(0, -15, 55) with a signpost NPC explaining which client to use and how to patch.
+
+**Open questions before building:**
+
+- **Kerra Isle is not safe as-is** — it has live kerran NPCs that will kill a naked level 1.
+  Needs a depop, a safe sub-area, or a different zone.
+- **Verify both coordinates in-game.** The qcat "white room" box in particular — confirm it is
+  inside geometry and has no fall-through, on *each* client to be supported.
+- **No starting gear + no starting zone gear source** means a naked level 1 with no weapon.
+  Confirm the first-hour path exists before clearing `starting_items`.
+
+### G1 — Fork akk-stack · **S** · open · **before go-live**
+
+`/opt/eqemu-servers/akk-stack` tracks `EQEmu/akk-stack`, which we cannot push to, so `.env`,
+`docker-compose*.yml`, and every local change to that tree have no remote. Currently mitigated
+— not solved — by `wd-backup-nightly`, which archives `.env`, the compose files, and a patch of
+local changes to Dropbox nightly.
+
+Fork it, `origin`→`upstream`, add a fourth repo-scoped deploy key, same pattern as the other
+three repos. Do this before go-live: a rebuild from backup is fine for a dev box, not for a
+live server. Keep `.env` gitignored — secrets stay in the backup archive, not in git.
+
 ---
 
 ## Recommended first moves
