@@ -1076,6 +1076,13 @@ per class is what makes this tractable; don't generate the full product.
 **4. Single entry point.** Starting gear: `starting_items` (148 rows) — clear via migration.
 Start zone: `start_zones` (411 rows).
 
+**Disable the tutorial.** Gloomingdeep (zone 189) is reserved as later content — players must
+not be able to route there at creation. `World:EnableTutorialButton` is currently **`true` in
+`rule_values`**; set it `false`. That rule gates the tutorial branch at `world/client.cpp:891`,
+so both the tutorial button and the `StartInTutorial` creation path (`:770`) go dead. Note the
+stock comment: on RoF2 the *button* remains pressable, it simply stops having an effect.
+`World:TutorialZoneID` (189) and `MaxLevelForTutorial` can stay as-is once the gate is off.
+
 Client-version-dependent start zone is **not natively supported** — char creation has no view
 of client version. Do it on first zone-in instead: set one start zone for everyone, then a
 `global_player` script branches on `$client->ClientVersion()` and `MovePC()`s RoF2 clients out
