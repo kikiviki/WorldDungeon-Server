@@ -200,7 +200,20 @@ focus path) is **independent of the defect** and is the one genuinely open quest
    own `formula 105`, not from the mantle.
 4. **Cleric smite + recourse, HP buffs, worship lines, health balance** — remembering SPA 153's
    **inverted sign** (positive base = penalty).
-5. **Monk pools** — offense then defense. Each stance needs its **own proc** (decided), and each
+5. 🚧 **Magician — next class, started.** The only one of the eleven with **zero engine
+   dependencies**, so it ships without waiting on any W-item.
+   - ✅ §9f bolt and rain (spells 18–22) authored as
+     [`0014`](../../worlddungeon/migrations/0014_magician_bolt_and_rain.sql) — 15 rows, caps
+     reachable from the start, SQL-validated in scratch.
+   - 🔴 **Prerequisite for the class core:** spells 1–4, the four elemental servants, carry their
+     identity on **`npc_types` templates plus `pets` rows that do not exist**. Authoring the
+     summon spells first would produce SPA 33 rows pointing at nothing. That is a per-zone
+     `npc_types` band claim under F1 and needs its own migration **before** the Magician's core
+     can be built.
+   - ⏳ Spells 6, 7, 11–17 carry unresolved ⚠️ (AEMelee shape, pet avoidance SPA, non-caster aura
+     anchoring, the familiar graft mechanism) — source verification needed.
+   - ⏳ Spells 23–27 summon **items** and need ids from the 1,000,000+ band.
+6. **Monk pools** — offense then defense. Each stance needs its **own proc** (decided), and each
    pool needs its shared layout budgeted *before* any of it is authored.
 
 ### 🔴 Retune the unapplied migrations against [ENGINE-CAPS.md](ENGINE-CAPS.md)
