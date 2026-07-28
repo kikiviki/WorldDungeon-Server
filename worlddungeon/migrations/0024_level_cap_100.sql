@@ -1,0 +1,103 @@
+-- 0024_level_cap_100
+--
+-- Purpose: raise the player level cap from 70 to 100.
+--
+--   Ten tiers of ten levels. tier = ceil(level / 10). 100 is the badge.
+--
+-- ID ranges claimed: none. Rule values only.
+--
+-- Idempotent: REPLACE INTO on the natural key (ruleset_id, rule_name).
+--
+-- ⚠️ REQUIRES A ZONE RESTART, NOT #reload rules. See the skill cap note below.
+--
+-- Ruleset 1 = 'default'.
+--
+--
+-- ================== WHY THIS NEEDED A C++ FIX TO WORK =======================
+--
+-- Shipped alongside a fix to common/skill_caps.cpp. Without it this migration
+-- would have SILENTLY FROZEN ALL SKILL PROGRESSION FROM 76 TO 100.
+--
+-- skill_cap_max_level was a namespace-scope global initialised straight from
+-- RuleI(...) at static-init time - before main() loads rule_values - so it only
+-- ever saw Character:SkillCapMaxLevel's COMPILED DEFAULT of 75, never the
+-- database. GetSkillCap clamps the requested level to it, so every skill's cap
+-- would have stopped improving at its level-75 value.
+--
+-- That was invisible at MaxLevel 70 (75 > 70, nothing clamped) and would have
+-- appeared only once the cap went up. It is now evaluated per call, so
+-- Character:SkillCapMaxLevel = -1 finally means what its own documentation says
+-- - "use MaxLevel" - and skill caps track the cap to 100.
+--
+-- SkillCapMaxLevel is deliberately left at -1 rather than pinned to 100, so it
+-- follows MaxLevel automatically if the cap ever moves again.
+--
+--
+-- ========================== WHAT IS ALREADY IN PLACE ========================
+--
+-- Verified against this database, not assumed:
+--
+--   base_data   levels 1-100, all 16 classes (1600 rows). This is the REAL
+--               ceiling: Zone::GetBaseData does an exact level+class match and
+--               returns a ZEROED entity on miss, and CalcBaseHP then skips its
+--               whole block, leaving base_hp at 5. Level 101 would be a silent
+--               cliff. 100 is exactly the last supported level.
+--   skill_caps  levels 1-100, ~603 rows per level, consistent from 76 to 100.
+--               Falls off a cliff after (2 rows at 101).
+--   level_exp_mods  levels 1-100.
+--
+-- HARD_LEVEL_CAP in common/features.h is 127, so 100 is well inside the engine
+-- limit. SKILL_MAX_LEVEL 75 in the same file is defined but never referenced -
+-- dead, ignore it.
+--
+--
+-- ⚠️ ======================= TWO LANDMINES, NOT FIXED HERE ===================
+--
+-- 1. THE EXP FORMULA IS uint32 AND LEVEL 100 SITS AT 70% OF IT.
+--
+--    Client::GetEXPForLevel is (level-1)^3 * mod * 1000, mod 3.1 above level 60,
+--    returned as uint32 (max 4,294,967,295):
+--
+--      level  70 ->   1,018,377,900   (24%)
+--      level 100 ->   3,007,926,900   (70%)
+--      level 113 ->   4,355,276,800   OVERFLOW
+--
+--    Safe as configured. BUT Character:UseOldRaceExpPenalties and
+--    UseOldClassExpPenalties are both currently FALSE, and they multiply this
+--    result. Turn BOTH on and a Troll or Iksar Paladin/SK/Ranger/Bard computes
+--    3.008e9 * 1.2 * 1.4 = 5.05e9 and WRAPS - making level 100 cost less
+--    experience than level 99. Class penalties alone reach 4.21e9 at 100, which
+--    fits with 2% headroom and overflows at 101.
+--
+--    Do not enable both old penalty rules at this cap without fixing the return
+--    type first.
+--
+-- 2. npc_scale_global_base STOPS AT LEVEL 90.
+--
+--    3 types x 90 levels = 270 rows. Mobs at 91-100 get no scaling at all - no
+--    rows means no stats. Harmless today because no such mobs exist, and
+--    tracked in BACKLOG F5 / ZONE-AND-MOB-SCALING.md as 30 rows to add before
+--    any tier 10 content is built.
+--
+--
+-- ============================ KNOWN SIDE EFFECT =============================
+--
+-- Client::CanHaveSkill asks for the cap at MaxLevel, so raising it flips four
+-- class/skill pairs from "cannot have" to "can have":
+--
+--   Bard      Double Attack (first row at level 71, cap 150 at 100)
+--   Bard      Triple Attack (cap 125)
+--   Beastlord Double Attack
+--   Beastlord Triple Attack
+--
+-- wd_newbie.lua gates its ability seed on CanHaveSkill, so Bards and Beastlords
+-- will now be seeded Double and Triple Attack at 10 on their first Kerra Isle
+-- zone-in. Believed desirable, but it is a behaviour change that arrives as a
+-- consequence of the level cap rather than as its own decision - flagging it
+-- so it is not mistaken for a seed bug later.
+
+REPLACE INTO `rule_values` (`ruleset_id`, `rule_name`, `rule_value`, `notes`) VALUES
+    (1, 'Character:MaxLevel', '100',
+     'WD 0024: was 70. Ten tiers of ten. Requires the skill_caps.cpp static-init fix shipped with this migration.'),
+    (1, 'Character:SkillCapMaxLevel', '-1',
+     'WD 0024: -1 = follow Character:MaxLevel. Only honoured since the skill_caps.cpp fix; before that this value was never read.');

@@ -22,11 +22,27 @@
 // cache the skill cap max level in the database
 std::map<uint8_t, int32_t> skill_max_level = {};
 
-uint8 skill_cap_max_level = (
-	RuleI(Character, SkillCapMaxLevel) > 0 ?
-		RuleI(Character, SkillCapMaxLevel) :
-		RuleI(Character, MaxLevel)
-);
+// WD: this was a namespace-scope global initialised straight from RuleI(...),
+// i.e. at STATIC INIT TIME - before main() loads rule_values from the database.
+// RuleManager::Instance() therefore still held compiled defaults, so this could
+// only ever see Character:SkillCapMaxLevel's default of 75 and could never see
+// the database at all. Setting that rule did nothing, and raising
+// Character:MaxLevel did nothing: every skill's cap froze at its level-75 value.
+//
+// That was invisible while MaxLevel was 70 (75 > 70, so nothing clamped), and
+// would have silently frozen all skill progression from 76 to 100 the moment
+// the cap was raised.
+//
+// Evaluated per call instead, which is what the rule's own documentation
+// already promises: "-1 makes it use MaxLevel rule value". Cheap - these are
+// two array lookups, and the hot path (GetSkillCap) consults the prebuilt
+// skill_max_level map first and only falls back to this.
+static uint8 ConfiguredSkillCapMaxLevel()
+{
+	const int configured = RuleI(Character, SkillCapMaxLevel);
+
+	return static_cast<uint8>(configured > 0 ? configured : RuleI(Character, MaxLevel));
+}
 
 SkillCaps *SkillCaps::SetContentDatabase(Database *db)
 {
@@ -43,7 +59,7 @@ int32_t SkillCaps::GetSkillCapMaxLevel(uint8 class_id, EQ::skills::SkillType ski
 		return it->second;
 	}
 
-	return skill_cap_max_level;
+	return ConfiguredSkillCapMaxLevel();
 }
 
 SkillCapsRepository::SkillCaps SkillCaps::GetSkillCap(uint8 class_id, EQ::skills::SkillType skill_id, uint8 level)
@@ -76,7 +92,8 @@ uint8 SkillCaps::GetSkillTrainLevel(uint8 class_id, EQ::skills::SkillType skill_
 		return 0;
 	}
 
-	const uint8    max_level = level > skill_cap_max_level ? level : skill_cap_max_level;
+	const uint8    cap_max_level = ConfiguredSkillCapMaxLevel();
+	const uint8    max_level     = level > cap_max_level ? level : cap_max_level;
 	const uint64_t key       = (class_id * 1000000) + (level * 1000) + static_cast<uint32>(skill_id);
 	for (uint8 current_level = 1; current_level <= max_level; current_level++) {
 		auto pos = m_skill_caps.find(key);
@@ -114,8 +131,8 @@ void SkillCaps::LoadSkillCaps()
 				it->second = e.level;
 			}
 			// we never want to exceed the defined rule skill cap max level
-			if (it->second > skill_cap_max_level) {
-				it->second = skill_cap_max_level;
+			if (it->second > ConfiguredSkillCapMaxLevel()) {
+				it->second = ConfiguredSkillCapMaxLevel();
 			}
 		}
 		else {
