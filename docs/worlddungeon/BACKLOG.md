@@ -644,12 +644,17 @@ What was actually run:
 
 Full design: **[ZONE-AND-MOB-SCALING.md](ZONE-AND-MOB-SCALING.md)**. Summary of what is decided:
 
-**📏 A zone covers 3–4 levels.** The headline rule, and the one everything else serves. It is
-the con table's number, not a preference: with `UseOldConSystem` false, `+1..+3` is yellow and
-**`+4` is red** (`zone/mob_ai.cpp:2156`). A zone spanning more than 3 levels above its entry
-level contains mobs its own intended player cannot fight — the "cleared 1–4, stuck on 5–10"
-failure. So **a tier is two or three zones, never one**, and a zone's useful life ends ~6 levels
-above its floor where cons go gray and stop paying experience.
+**📏 A zone is a level, ±2.** The headline rule, and the one everything else serves. A zone
+declares the level a player should *be* while there and holds content ±2 around it — a level 5
+zone spans 3–7. It is the con table's number, not a preference: with `UseOldConSystem` false a
+player at the centre sees −2 Dark Blue, 0 White, +2 Yellow — nothing red, nothing gray, and both
+easy and hard targets always in reach. ±3 is the hard limit (`+4` cons red), so ±2 is deliberate
+headroom. **A tier is two or three zones, never one.** Kerra Isle is the one exception, declared
+level 2, because characters are created there at exactly level 1 and so arrive at the floor
+rather than the middle.
+
+Declared in `wd_zone` (0025/0026) and enforced by `worlddungeon/bin/wd-zone-check`, which diffs
+declared intent against the spawn tables and exits non-zero on failure.
 
 Tiers need no schema support: at a level 100 cap with 10-level tiers, `tier = ceil(level / 10)`.
 

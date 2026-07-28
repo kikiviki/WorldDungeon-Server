@@ -18,13 +18,15 @@
 #      CONSTRUCTOR — on every respawn — so a level 1 mob can return at level 10
 #      with no visual difference. This is a FAIL, never a warning.
 #
-#   2. BAND. Every mob sits within entry_level .. entry_level + 3. With
-#      UseOldConSystem false, +4 cons RED (zone/mob_ai.cpp:2156), so anything
-#      above the band is a mob the zone's own intended player cannot fight.
+#   2. BAND. Every mob sits within level-2 .. level+2, clamped at 1. A zone's
+#      declared level is the level a player should BE while there, so a
+#      centred band puts the whole zone between Dark Blue (-2) and Yellow
+#      (+2). With UseOldConSystem false, +4 cons RED and -6 cons gray
+#      (zone/mob_ai.cpp), so +/-2 leaves a level of headroom at both ends.
 #
 #   3. NO HOLES. Every level in the band has at least one spawn point, or
 #      players hit a wall partway through the zone. WARN, not FAIL — a
-#      deliberately 3-level zone in a 4-level band is legitimate.
+#      deliberately narrow zone inside a 5-level band is legitimate.
 #
 # Requires docker access to the akk-stack mariadb container.
 
@@ -68,11 +70,15 @@ fail_count=0
 warn_count=0
 
 check_zone() {
-  local zone="$1" entry="$2" notes="$3"
-  local top=$((entry + 3))
+  local zone="$1" center="$2" notes="$3"
+  # Clamp the floor at 1 — a level 2 zone spans 1-4, not 0-4. Levels below 1
+  # do not exist, and the starting zone is exactly this case.
+  local entry=$((center - 2))
+  [[ "$entry" -lt 1 ]] && entry=1
+  local top=$((center + 2))
   local zone_failed=0
 
-  echo "=== ${zone}  (entry level ${entry}, band ${entry}-${top})"
+  echo "=== ${zone}  (zone level ${center}, band ${entry}-${top})"
 
   local spawn_points
   spawn_points="$(query "SELECT COUNT(*) $(wd_join "$zone");")"
@@ -109,7 +115,7 @@ check_zone() {
   ")"
 
   if [[ -n "$strays" ]]; then
-    echo "    FAIL  mobs outside the ${entry}-${top} band (+4 cons red):"
+    echo "    FAIL  mobs outside the ${entry}-${top} band (+4 cons red, -6 cons gray):"
     printf '%s\n' "$strays"
     zone_failed=1
   else
@@ -157,7 +163,7 @@ check_undeclared() {
   ")"
 
   if [[ -n "$undeclared" ]]; then
-    echo "FAIL  zones with WD spawns but no wd_zone row (declare an entry_level):"
+    echo "FAIL  zones with WD spawns but no wd_zone row (declare a level):"
     printf '%s\n' "$undeclared"
     echo
     fail_count=$((fail_count + 1))
@@ -167,22 +173,22 @@ check_undeclared() {
 main() {
   local rows
   if [[ $# -ge 1 ]]; then
-    rows="$(query "SELECT short_name, entry_level, notes FROM wd_zone WHERE short_name = '$1';")"
+    rows="$(query "SELECT short_name, level, notes FROM wd_zone WHERE short_name = '$1';")"
     if [[ -z "$rows" ]]; then
-      echo "no wd_zone row for '$1' — declare it first (see migration 0025)" >&2
+      echo "no wd_zone row for '$1' — declare it first (see migrations 0025/0026)" >&2
       exit 1
     fi
   else
-    rows="$(query "SELECT short_name, entry_level, notes FROM wd_zone ORDER BY entry_level, short_name;")"
+    rows="$(query "SELECT short_name, level, notes FROM wd_zone ORDER BY level, short_name;")"
     if [[ -z "$rows" ]]; then
       echo "(no zones declared in wd_zone)"
       exit 0
     fi
   fi
 
-  while IFS=$'\t' read -r short_name entry_level notes; do
+  while IFS=$'\t' read -r short_name zone_level notes; do
     [[ -z "$short_name" ]] && continue
-    check_zone "$short_name" "$entry_level" "$notes"
+    check_zone "$short_name" "$zone_level" "$notes"
   done <<<"$rows"
 
   [[ $# -ge 1 ]] || check_undeclared

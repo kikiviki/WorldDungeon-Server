@@ -8,13 +8,14 @@ Foundational — every zone built from here follows this. Companion to
 
 ---
 
-## 1. 📏 A zone covers 3–4 levels. This is the rule everything else serves.
+## 1. 📏 A zone is a level, ±2. This is the rule everything else serves.
 
-**Decided.** Not a tier, not ten levels — **three or four**.
+**Decided.** A zone declares the level a player should **be** while there, and
+holds content **±2** around it. A level 5 zone spans **3–7**.
 
 It is not an aesthetic preference; it falls out of the con table. With
 `Character:UseOldConSystem` = `false` (our setting), `Mob::GetLevelCon`
-(`zone/mob_ai.cpp:2156`) gives:
+(`zone/mob_ai.cpp`) gives:
 
 | Level difference | Con | Meaning |
 |---|---|---|
@@ -23,19 +24,47 @@ It is not an aesthetic preference; it falls out of the con table. With
 | **+4 or more** | **Red** | not a fight, a death |
 | −6 or more | Gray | no experience awarded |
 
-So a mob **4 levels above** the player is red. A zone that spans more than
-3 levels above its entry level therefore contains mobs its own intended
-player physically cannot fight. That is the "cleared the level 1–4 mobs,
-now I'm stuck" failure, and the number is the engine's, not ours.
+A player standing at a level 5 zone's centre therefore sees:
+
+| Mob | diff | Con |
+|---|---|---|
+| 3 | −2 | Dark Blue — easy, still pays experience |
+| 5 | 0 | White |
+| 7 | +2 | Yellow — hard but winnable |
+
+**Nothing red, nothing gray, and both easy and hard targets in reach at all
+times.** That last part is why this is centred rather than bottom-anchored: a
+zone measured from its floor is uniformly punishing on arrival and uniformly
+trivial by the time you leave, which is worse pacing even though it satisfies
+the same con constraint.
+
+**Why ±2 and not ±3.** +4 is the red threshold, so ±3 is the hard limit — a
+7-level span. ±2 sits one level inside it deliberately, as headroom for players
+who arrive early or lag behind their gear. Gray is −6 below level 15, so a
+5-level span also never contains dead content for anyone inside it; a 7-level
+span would.
+
+> ⚠️ **±2 describes what is in the zone, never where.** A player arriving at
+> `level − 2` still meets +4 red at the top of the band. The `level + 2` mobs
+> must sit deeper in than the `level − 2` mobs — §2 is what makes this rule
+> survive contact with a real player.
+
+> **The starting zone is the one exception.** Everywhere else, players arrive
+> near the middle having outgrown the previous zone. Kerra Isle's characters
+> are *created* there at exactly level 1, so they always arrive at the floor.
+> It is declared level **2** (band 1–4, clamped) — at level 3 the band would
+> reach 5 and put red content in front of a brand new character.
 
 Two consequences worth stating explicitly:
 
 - **A tier is several zones, not one.** T1 covers levels 1–10, so T1 is
-  **two or three zones**, each 3–4 levels wide. Never one ten-level zone.
-- **A zone's useful life ends about 6 levels above its floor**, where cons go
-  gray and stop paying experience. A level 2–5 zone serves players until
-  roughly level 11. That is the spacing guide for how many zones a tier needs
-  and where they should overlap.
+  **two or three zones**, each a level ±2. Never one ten-level zone.
+- **A zone empties out from the bottom.** Gray is −6, so a level 5 zone's
+  weakest mobs (level 3) stop paying experience at player level 9, and its
+  strongest (level 7) at 11. In practice a zone is thinning by `level + 4` and
+  done by `level + 6`. That is the spacing guide: the **next** zone has to be
+  ready before players reach `level + 4`, which for 10-level tiers lands them
+  two or three zones deep per tier.
 
 Tiers themselves stay simple: with a level 100 cap and 10-level tiers,
 **`tier = ceil(level / 10)`**. The level *is* the tier — no separate tier flag
@@ -169,7 +198,12 @@ shape roughly right in one pass rather than nudging it live.
 
 Two invariants, one query each. Both must pass before a zone's flag goes on.
 
-**Level histogram — no holes, no tail beyond entry + 3:**
+Both are automated by **`worlddungeon/bin/wd-zone-check`**, which reads the
+declared level from `wd_zone` (migrations 0025/0026) and diffs it against what
+the spawn tables actually contain. It exits non-zero on any failure, so it can
+gate a deploy. The queries it runs, for reference:
+
+**Level histogram — no holes, nothing outside level ±2:**
 
 ```sql
 SELECT n.level, COUNT(*) AS spawn_points
