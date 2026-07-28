@@ -1070,8 +1070,14 @@ against a hardcoded 16-race C++ matrix, and the Titanium client hardcodes its ow
 This *supports* the RoF2-only direction in item 4 — but confirm it before authoring, because it
 decides whether Titanium is supported at all.
 
-Cross product is 16×16×17×26 = ~113k rows. Collapsing to one start zone and a sane deity list
-per class is what makes this tractable; don't generate the full product.
+**Deity — DECIDED: Agnostic (`396`) for every combo.** The stock table carries 17 deities
+(201–216 + 396). Collapsing to Agnostic alone, plus a single start zone, reduces the naive
+16×16×17×26 ≈ 113k cross product to **16×16 = 256 rows**. Deity worship becomes later quest
+content, not a creation-time choice.
+
+**Titanium — DECIDED: not supported, and that is the design.** Titanium validates against a
+hardcoded C++ matrix and will only ever offer canonical combos. Rather than fix that, Titanium
+clients land in the `qcat` room and are told to get RoF2. No C++ needed.
 
 **4. Single entry point.** Starting gear: `starting_items` (148 rows) — clear via migration.
 Start zone: `start_zones` (411 rows).
@@ -1161,15 +1167,41 @@ levels 6–12), so T0 serves levels 1–5 at roughly two-thirds of T1 damage, **
 
 | Form | `itemtype` | dmg | delay |
 |---|---|---|---|
-| 1HS / 1HP / 1HB | 0 / 2 / 3 | 8 | 28 |
-| Martial | 45 | 8 | 26 |
-| 2HS / 2HB | 1 / 4 | 14 | 40 |
-| 2HP | 35 | 14 | 40 |
+| 1HS / 1HP / 1HB | 0 / 2 / 3 | 8 | **28** |
+| Martial | 45 | 8 | **26** |
+| 2HS / 2HB / 2HP | 1 / 4 / 35 | 14 | **45** |
 
-🔴 **Delay is a new number — the vault does not specify delay at any tier.** *Gear System* §2.3
-gives damage only, so the entire T1–T10 curve is underspecified: ratio (dmg ÷ delay) is what
-sets DPS, not damage alone. The delays above are proposals consistent with EQ norms. **Settle
-the tier-wide delay convention before authoring T0**, or T0 will anchor a curve nobody chose.
+**Delay convention — DECIDED: delay is FIXED across all tiers; only damage grows.** *Gear
+System* §2.3 specifies damage but no delay at any tier, so this decision defines the ratio
+curve for T1–T10, not just T0.
+
+Holding delay constant makes haste a **constant multiplier at every tier** — haste % never
+gets diluted, which is the stated goal. It also means delay can be lowered later as a buff;
+raising it is the change players feel as a nerf, so starting slow is the safe direction.
+
+**Why 2H delay 45.** `Mob::GetWeaponDamageBonus()` (`zone/attack.cpp:3408`) pays 2H a
+delay-scaled bonus with hard breakpoints — nothing below 40, and the steps are not linear:
+
+| 2H delay | `delay_bonus` |
+|---|---|
+| < 40 | **0** |
+| 40–42 | 1 |
+| 43–44 | 2 |
+| **45+** | **4** |
+
+40 and 42 are identical; 45 is where the bonus actually becomes weight. Resulting DPS before
+bonuses — 2H leads 1H by ~12% at every tier, on top of 4 aug sockets vs 2:
+
+| | T0 | T1 | T10 |
+|---|---|---|---|
+| 1H (d28) | 2.9 | 4.3 | 46.4 |
+| 2H (d45) | 3.1 | 4.9 | 52.2 |
+
+🔴 **The 2H damage bonus does not exist below level 28.** `attack.cpp:1674` gates it on
+`GetLevel() >= 28 && IsWarriorClass()`, primary hand only. So across T0–T3 (levels 1–~27) a
+delay-45 2H is **pure slowness with no compensating bonus**, and casters never receive it at
+any level. The Berserker — the one class granted 2HS at creation — feels this most. If early
+2H tests badly, the lever is T0-only delay, not the tier convention.
 
 **Per-class starting form.** All 7 items are all/all and any player can cycle to any form; the
 class only decides which form is *granted* at creation:

@@ -1,0 +1,66 @@
+-- 0016_open_creation_rules
+--
+-- Purpose: the two rule flips that A11 needs and that need nothing else first.
+--
+--   1. Remove Ogre frontal stun immunity.
+--   2. Disable the tutorial, so nobody can route into Gloomingdeep at creation.
+--      Gloomingdeep (zone 189) is reserved as later content.
+--
+-- ID ranges claimed: none. Rule values only.
+--
+-- Idempotent: REPLACE INTO on the natural key (ruleset_id, rule_name).
+--
+-- Requires a rule reload to take effect: #reloadrules, or a server restart.
+--
+-- Ruleset 1 = 'default' (rule_sets). Both rows already exist in ruleset 1 today
+-- at their stock values, so these are overwrites, not new rows.
+--
+--
+-- ===================== 1. OGRE FRONTAL STUN IMMUNITY ========================
+--
+-- Combat:FrontalStunImmunityRaces is a BITMASK over player races, stock value
+-- 512 = the Ogre bit and nothing else. Setting it to 0 removes the immunity
+-- with no C++ change: zone/attack.cpp:4338 reads the rule directly.
+--
+--     if (IsPlayerRace(GetBaseRace()) &&
+--         RuleI(Combat, FrontalStunImmunityRaces) & GetPlayerRaceBit(GetBaseRace()))
+--         is_immune_to_frontal_stun = true;
+--
+-- This covers players AND NPCs. Combat:NPCsUseFrontalStunImmunityRaces is true
+-- by default, but it gates reading of the SAME mask - zeroing the mask disables
+-- both paths at once, so that rule is deliberately left alone.
+--
+-- ⚠️ ONE HARDCODED CASE SURVIVES THIS MIGRATION. In the same block, the race
+-- check is OR'd with an unconditional literal:
+--
+--     ) || GetBaseRace() == Race::OggokCitizen) {
+--
+-- Race::OggokCitizen is NOT rule-gated and cannot be turned off from data. It
+-- is an NPC race, so this is harmless today. It would only matter if a player
+-- or bot were ever given that race - if that happens, this needs C++.
+--
+-- Combat:FrontalStunImmunityClasses is already 0 (stock) and is left alone.
+--
+--
+-- ===================== 2. TUTORIAL / GLOOMINGDEEP ===========================
+--
+-- World:EnableTutorialButton gates BOTH tutorial entry paths in world/client.cpp:
+--
+--   :891  the "Tutorial" button on the character select screen
+--   :770  StartInTutorial, the create-character-into-the-tutorial path
+--
+-- Both sit behind RuleB(World, EnableTutorialButton), so false closes both.
+--
+-- NOTE, from the stock rule's own comment: on RoF2 the BUTTON REMAINS
+-- PRESSABLE - it simply stops doing anything. Expect players to press it and
+-- see nothing happen. That is the engine's behaviour, not a bug in this change.
+--
+-- World:TutorialZoneID (189) and World:MaxLevelForTutorial are deliberately NOT
+-- touched. They are inert once the gate above is off, and leaving them intact
+-- means re-enabling the tutorial later is a one-row change.
+
+REPLACE INTO `rule_values` (`ruleset_id`, `rule_name`, `rule_value`, `notes`) VALUES
+    (1, 'Combat:FrontalStunImmunityRaces', '0',
+     'WD 0016: was 512 (Ogre). All races stunnable from the front.'),
+    (1, 'World:EnableTutorialButton', 'false',
+     'WD 0016: Gloomingdeep (189) is reserved as later content.');
