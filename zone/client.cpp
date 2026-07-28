@@ -9666,6 +9666,29 @@ void Client::InitInnates()
 			break;
 	}
 
+	// WD A12: universal darkvision. Every race sees in the dark, so a race is
+	// never the reason a player cannot navigate a zone. This pairs with A12's
+	// stat flattening - racial advantage is meant to be size and traversal, not
+	// numbers, and vision was the one remaining hard gate that made some races
+	// strictly worse at simply looking around.
+	//
+	// This deliberately overrides everything the race switch above just decided,
+	// including the `race >= Race::Froglok2` block near the top. It is placed
+	// after the switch rather than folded into it precisely so it cannot be
+	// missed when a case is edited later.
+	//
+	// Infravision is cleared rather than left set alongside UltraVision: no stock
+	// race sets both, so "both enabled" is a combination the client is never
+	// shipped and we have no reason to be the first to send it. UltraVision is
+	// the stronger of the two, so clearing Infravision loses nothing.
+	//
+	// InitInnates re-runs on illusions, mounts, and vision-buff removal
+	// (client_packet.cpp:1482 and SetHeights), so this self-heals rather than
+	// needing to be re-applied - which is why this route was chosen over the
+	// SPA 65/66 buff route, which would occupy a buff slot and be dispellable.
+	m_pp.InnateSkills[InnateInfravision] = InnateDisabled;
+	m_pp.InnateSkills[InnateUltraVision] = InnateEnabled;
+
 	switch (class_) {
 		case Class::Druid:
 			m_pp.InnateSkills[InnateHarmony] = InnateEnabled;
