@@ -1203,6 +1203,42 @@ A11's all/all weapons those skills will never rise past the floor this script se
 progression question for whenever weapon skill beyond the newbie zone starts to matter — not
 part of shipping the starter weapon.
 
+**Meditate floor — two corrections before building this.**
+
+🔴 **Meditate does not affect spell scribing or memorization.** Its only use is the sitting
+mana-regen formula at `zone/client_mods.cpp:643`:
+
+```
+regen = ((skill / 10) + (level - level/4)) / 4 + 4
+```
+
+Memorize timing is **client-side**; the server only anti-cheat validates it
+(`Handle_OP_MemorizeSpell` → `cheat_manager.CheckMemTimer()`, `zone/client_packet.cpp:10368`).
+There is no server-side scribe-speed knob to turn.
+
+🔴 **A floor of 15 is a no-op.** Both divisions are integer, so skill only registers in steps of
+10 and is then blunted by the outer `/4`. Measured against the real formula:
+
+| Meditate skill | regen @ lvl 1 | regen @ lvl 50 |
+|---|---|---|
+| 0 | 4 | 13 |
+| 10 (current caster cap) | 4 | 13 |
+| **15** | **4** | **13** |
+| 20 | 4 | 14 |
+| 30 | **5** | 14 |
+
+15 is identical to 10 at every level. **Floor to 30** for a real level-1 gain, or skip it.
+
+Level-1 Meditate caps today: pure casters (Cleric, Druid, Shaman, Nec, Wiz, Mag, Enc) 10;
+hybrids (Pal, Rng, SK, Beastlord) 5; Bard 0; War/Monk/Rogue/Berserker have no row. Gate the
+floor on **class**, not `HasSkill()` — flooring by skill presence would hand Warriors meditate
+regen they are not meant to have.
+
+**If the goal is less time scribing, the lever is `ScribeSpells`.** `Lua_Client::ScribeSpells`
+(`zone/lua_client.cpp:2395`, `min_level, max_level`) grants spells directly into the book,
+skipping scrolls and scribe time entirely — one call in the newbie flow does what no amount of
+Meditate can. `Spells:AllowSpellMemorizeFromItem` is a lighter alternative.
+
 **Gotchas to design around:**
 
 - **Equipped 2H vs. shield.** Cycling 1H → 2H while a secondary is equipped must be blocked or
