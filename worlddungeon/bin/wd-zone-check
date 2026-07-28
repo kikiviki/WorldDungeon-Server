@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+#
+# wd-zone-check — pre-flight a WorldDungeon zone before switching its flag on.
+#
+# Compares what wd_zone DECLARES a zone should be against what the spawn tables
+# actually contain. Intent lives in wd_zone (see migration 0025); reality is
+# derived from spawn2 -> spawnentry -> npc_types. This script is the diff.
+#
+#   wd-zone-check              check every zone declared in wd_zone
+#   wd-zone-check <short_name>  check one zone
+#
+# Exits non-zero if any zone FAILs, so it can gate a deploy.
+#
+# The rules it enforces come from docs/worlddungeon/ZONE-AND-MOB-SCALING.md:
+#
+#   1. NO REROLLS. npc_types.maxlevel must be 0 or equal to level. Otherwise
+#      NPC::LevelScale() re-rolls random.Int(level, maxlevel) in the NPC
+#      CONSTRUCTOR — on every respawn — so a level 1 mob can return at level 10
+#      with no visual difference. This is a FAIL, never a warning.
+#
+#   2. BAND. Every mob sits within entry_level .. entry_level + 3. With
+#      UseOldConSystem false, +4 cons RED (zone/mob_ai.cpp:2156), so anything
+#      above the band is a mob the zone's own intended player cannot fight.
+#
+#   3. NO HOLES. Every level in the band has at least one spawn point, or
+#      players hit a wall partway through the zone. WARN, not FAIL — a
+#      deliberately 3-level zone in a 4-level band is legitimate.
+#
+# Requires docker access to the akk-stack mariadb container.
+
+set -euo pipefail
+
+STACK="${STACK_DIR:-/opt/eqemu-servers/akk-stack}"
+
+cd "$STACK"
+set -a; . ./.env; set +a
+export MARIADB_USER MARIADB_PASSWORD MARIADB_DATABASE
+
+# The docker group isn't active in a non-interactive shell until a fresh login
+# (akk-stack README section 6), so fall back to `sg docker`.
+docker_run() {
+  if docker info >/dev/null 2>&1; then
+    bash -c "$1"
+  else
+    sg docker -c "$1"
+  fi
+}
+
+query() {
+  printf '%s\n' "$1" | docker_run "docker compose exec -T -e MYSQL_PWD=\"\$MARIADB_PASSWORD\" \
+    mariadb mysql -u\"\$MARIADB_USER\" \"\$MARIADB_DATABASE\" --batch --skip-column-names"
+}
+
+# WD mirror spawns are identified by content_flags = 'wd_<zone>' on spawn2.
+# Stock spawns carry the same flag in content_flags_disabled and are ignored
+# here — we only ever check what WorldDungeon itself placed.
+wd_join() {
+  local zone="$1"
+  cat <<SQL
+FROM spawn2 s
+JOIN spawnentry se ON se.spawngroupID = s.spawngroupID
+JOIN npc_types  n  ON n.id = se.npcID
+WHERE s.zone = '${zone}' AND s.content_flags = 'wd_${zone}'
+SQL
+}
+
+fail_count=0
+warn_count=0
+
+check_zone() {
+  local zone="$1" entry="$2" notes="$3"
+  local top=$((entry + 3))
+  local zone_failed=0
+
+  echo "=== ${zone}  (entry level ${entry}, band ${entry}-${top})"
+
+  local spawn_points
+  spawn_points="$(query "SELECT COUNT(*) $(wd_join "$zone");")"
+
+  if [[ "$spawn_points" -eq 0 ]]; then
+    echo "    SKIP  no WD spawns yet (declared, not built)"
+    [[ -n "$notes" ]] && echo "          note: ${notes}"
+    echo
+    return
+  fi
+
+  echo "    ${spawn_points} WD spawn point(s)"
+
+  # --- 1. rerolls -----------------------------------------------------------
+  local rerolls
+  rerolls="$(query "
+    SELECT DISTINCT CONCAT('          ', n.id, '  ', n.name, '  level ', n.level, ' maxlevel ', n.maxlevel)
+    $(wd_join "$zone") AND n.maxlevel > n.level;
+  ")"
+
+  if [[ -n "$rerolls" ]]; then
+    echo "    FAIL  level re-rolls on respawn (set maxlevel = 0 or = level):"
+    printf '%s\n' "$rerolls"
+    zone_failed=1
+  else
+    echo "    ok    no level re-rolls"
+  fi
+
+  # --- 2. band --------------------------------------------------------------
+  local strays
+  strays="$(query "
+    SELECT DISTINCT CONCAT('          ', n.id, '  ', n.name, '  level ', n.level)
+    $(wd_join "$zone") AND (n.level < ${entry} OR n.level > ${top});
+  ")"
+
+  if [[ -n "$strays" ]]; then
+    echo "    FAIL  mobs outside the ${entry}-${top} band (+4 cons red):"
+    printf '%s\n' "$strays"
+    zone_failed=1
+  else
+    echo "    ok    all mobs within band"
+  fi
+
+  # --- 3. holes -------------------------------------------------------------
+  local present hole_list=""
+  present="$(query "SELECT DISTINCT n.level $(wd_join "$zone") ORDER BY n.level;")"
+
+  local lvl
+  for ((lvl = entry; lvl <= top; lvl++)); do
+    grep -qx "$lvl" <<<"$present" || hole_list+=" $lvl"
+  done
+
+  if [[ -n "$hole_list" ]]; then
+    echo "    WARN  no spawns at level(s):${hole_list}"
+    warn_count=$((warn_count + 1))
+  else
+    echo "    ok    every level in band populated"
+  fi
+
+  # --- histogram ------------------------------------------------------------
+  echo "    histogram:"
+  query "
+    SELECT CONCAT('          level ', LPAD(n.level, 3, ' '), '  ', LPAD(COUNT(*), 4, ' '), '  ', REPEAT('#', LEAST(COUNT(*), 40)))
+    $(wd_join "$zone") GROUP BY n.level ORDER BY n.level;
+  "
+
+  [[ "$zone_failed" -eq 1 ]] && fail_count=$((fail_count + 1))
+  echo
+}
+
+# --- undeclared zones ---------------------------------------------------------
+# A zone carrying WD spawns but absent from wd_zone has no declared intent, so
+# nothing can be checked against it. That is a FAIL, not a warning — it is
+# exactly the state this table exists to prevent.
+check_undeclared() {
+  local undeclared
+  undeclared="$(query "
+    SELECT DISTINCT CONCAT('    ', s.zone)
+    FROM spawn2 s
+    WHERE s.content_flags = CONCAT('wd_', s.zone)
+      AND s.zone NOT IN (SELECT short_name FROM wd_zone);
+  ")"
+
+  if [[ -n "$undeclared" ]]; then
+    echo "FAIL  zones with WD spawns but no wd_zone row (declare an entry_level):"
+    printf '%s\n' "$undeclared"
+    echo
+    fail_count=$((fail_count + 1))
+  fi
+}
+
+main() {
+  local rows
+  if [[ $# -ge 1 ]]; then
+    rows="$(query "SELECT short_name, entry_level, notes FROM wd_zone WHERE short_name = '$1';")"
+    if [[ -z "$rows" ]]; then
+      echo "no wd_zone row for '$1' — declare it first (see migration 0025)" >&2
+      exit 1
+    fi
+  else
+    rows="$(query "SELECT short_name, entry_level, notes FROM wd_zone ORDER BY entry_level, short_name;")"
+    if [[ -z "$rows" ]]; then
+      echo "(no zones declared in wd_zone)"
+      exit 0
+    fi
+  fi
+
+  while IFS=$'\t' read -r short_name entry_level notes; do
+    [[ -z "$short_name" ]] && continue
+    check_zone "$short_name" "$entry_level" "$notes"
+  done <<<"$rows"
+
+  [[ $# -ge 1 ]] || check_undeclared
+
+  if [[ "$fail_count" -gt 0 ]]; then
+    echo "FAILED — ${fail_count} zone(s) not ready, ${warn_count} warning(s)."
+    exit 1
+  fi
+
+  echo "OK — all declared zones pass, ${warn_count} warning(s)."
+}
+
+main "$@"
