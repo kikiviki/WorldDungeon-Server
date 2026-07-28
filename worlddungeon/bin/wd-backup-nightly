@@ -5,12 +5,22 @@
 # Installed in the eqdev crontab as:
 #   0 4 * * * /opt/eqemu-servers/akk-stack/code/worlddungeon/bin/wd-backup-nightly
 #
-# Backs up the two things that cannot be rebuilt from git:
+# Backs up the things that cannot be rebuilt from git:
 #   - the peq database (player state and any custom rows)
 #   - server config (eqemu_config.json, login.json)
+#   - deployment config: .env, docker-compose*.yml, and our local changes to
+#     the akk-stack tree. akk-stack's origin is EQEmu's repo, not ours, so
+#     nothing under it can be pushed - this archive is its only off-box copy.
+#   - SSH material: the host deploy keys that reach our GitHub forks, the
+#     container keys under assets/ssh, and the crontab that runs this job.
 #
-# Everything else - the engine, and every custom row's defining SQL under
-# worlddungeon/migrations/ - is version-controlled and already safe on GitHub.
+# The engine and every custom row's defining SQL under worlddungeon/migrations/
+# is version-controlled and already safe on GitHub.
+#
+# The config archive contains credentials AND private keys. It is written 0600,
+# and lands in Dropbox - acceptable for disaster recovery, but it means a
+# Dropbox compromise is a key compromise. Deploy keys are per-repo and easy to
+# rotate; do that rather than treating this archive as safe to share.
 #
 # Destination is a Dropbox-synced folder, so backups leave this box. A backup on
 # the same disk as the database is not a backup.
@@ -41,17 +51,71 @@ else
   fail=1
 fi
 
-# --- server config ------------------------------------------------------
-# These contain credentials, so the archive is written 0600.
+# --- server + deployment config -----------------------------------------
+# Staged into a directory first so the archive has a readable layout and can
+# draw from several roots. Contains credentials and private keys: 0600.
 CONFIG_OUT="$DEST/wd-config-$(date +%Y-%m-%d-%H%M%S).tar.gz"
-if tar -czf "$CONFIG_OUT" -C "$STACK/server" eqemu_config.json login.json 2>/dev/null; then
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+
+# copy_in <src> <dest-relative-to-stage> - missing optional files are noted,
+# not fatal; a genuinely required file failing is caught by the audit below.
+copy_in() {
+  local src="$1" rel="$2"
+  if [[ -e "$src" ]]; then
+    mkdir -p "$STAGE/$(dirname "$rel")"
+    cp -a "$src" "$STAGE/$rel" || { echo "!! could not copy $src"; return 1; }
+  else
+    echo "==> absent, skipped: $src"
+  fi
+  return 0
+}
+
+copy_in "$STACK/server/eqemu_config.json" "server/eqemu_config.json"
+copy_in "$STACK/server/login.json"        "server/login.json"
+copy_in "$STACK/.env"                     "akk-stack/.env"
+copy_in "$STACK/docker-compose.yml"       "akk-stack/docker-compose.yml"
+copy_in "$STACK/docker-compose.dev.yml"   "akk-stack/docker-compose.dev.yml"
+copy_in "$STACK/assets/ssh"               "akk-stack/assets-ssh"
+copy_in "$HOME/.ssh"                      "host-ssh"
+
+# Our local edits to akk-stack as a patch. akk-stack tracks EQEmu's repo, so
+# this diff is the only record of what we changed; a full tree copy would be
+# mostly upstream code. Untracked files are listed separately since a diff
+# cannot express them.
+if git -C "$STACK" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git -C "$STACK" diff HEAD > "$STAGE/akk-stack/local-changes.patch" 2>/dev/null
+  {
+    echo "# akk-stack local state at $(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "# HEAD: $(git -C "$STACK" rev-parse HEAD 2>/dev/null)"
+    echo "# origin: $(git -C "$STACK" remote get-url origin 2>/dev/null)"
+    echo "# --- untracked (excluding ignored data/backups) ---"
+    git -C "$STACK" ls-files --others --exclude-standard
+  } > "$STAGE/akk-stack/local-state.txt" 2>/dev/null
+fi
+
+crontab -l > "$STAGE/crontab.txt" 2>/dev/null || echo "==> no crontab to capture"
+
+# Audit: these must be present or the archive is not worth keeping.
+missing=""
+for req in server/eqemu_config.json akk-stack/.env host-ssh/config; do
+  [[ -e "$STAGE/$req" ]] || missing="$missing $req"
+done
+if [[ -n "$missing" ]]; then
+  echo "!! CONFIG BACKUP INCOMPLETE - missing:$missing"
+  fail=1
+fi
+
+if tar -czf "$CONFIG_OUT" -C "$STAGE" . 2>/dev/null; then
   chmod 600 "$CONFIG_OUT"
-  echo "OK  $CONFIG_OUT  ($(du -h "$CONFIG_OUT" | cut -f1))"
+  echo "OK  $CONFIG_OUT  ($(du -h "$CONFIG_OUT" | cut -f1), $(tar -tzf "$CONFIG_OUT" | grep -cv '/$') files)"
 else
   echo "!! CONFIG BACKUP FAILED"
   rm -f "$CONFIG_OUT"
   fail=1
 fi
+rm -rf "$STAGE"
+trap - EXIT
 
 # --- prune --------------------------------------------------------------
 # Only ever touches files this tooling names. Prune runs even if a backup
